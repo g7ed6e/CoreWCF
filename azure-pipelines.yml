@@ -11,13 +11,13 @@ variables:
   _testProjects: '**/*.Tests.csproj'
 
 stages:
-- template: templates/BuildStage.yml
-  parameters:
-    buildProjects: $(_libraryProjects)
+# - template: templates/BuildStage.yml
+#   parameters:
+#     buildProjects: $(_libraryProjects)
 
-- template: templates/TestStage.yml
-  parameters:
-    testProjects: $(_testProjects)
+# - template: templates/TestStage.yml
+#   parameters:
+#     testProjects: $(_testProjects)
 
 - template: templates/CodeAnalysis.yml
   parameters:

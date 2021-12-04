@@ -33,12 +33,11 @@ stages:
       displayName: 'Prepare analysis on SonarCloud'
       inputs:
         SonarCloud: SonarCloud
-        organization: corewcf
-        projectKey: CoreWCF_CoreWCF
-        projectName: 'CoreWCF Code Coverage'
+        organization: g7ed6e
+        projectKey: g7ed6e.CoreWCF
+        projectName: 'CoreWCF'
         extraProperties: |
           sonar.cs.opencover.reportsPaths=$(Agent.TempDirectory)/**/coverage.opencover.xml
-          sonar.inclusions=src/**/*.cs
           sonar.exclusions=src/Samples/**/*.*
           sonar.coverage.exclusions=src/**/tests/**/*.cs
           sonar.verbose=true

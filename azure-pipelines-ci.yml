@@ -17,23 +17,23 @@ variables:
   _testProjects: '**/*.Tests.csproj'
 
 stages:
-- template: templates/BuildStage.yml
-  parameters:
-    buildProjects: $(_libraryProjects)
+# - template: templates/BuildStage.yml
+#   parameters:
+#     buildProjects: $(_libraryProjects)
 
-- template: templates/TestStage.yml
-  parameters:
-    testProjects: $(_testProjects)
+# - template: templates/TestStage.yml
+#   parameters:
+#     testProjects: $(_testProjects)
 
 - template: templates/CodeAnalysis.yml
   parameters:
     testProjects: $(_testProjects)
     solution: $(_solution)
 
-- template: templates/PackStage.yml
-  parameters:
-    packProjects: $(_libraryProjects)
+# - template: templates/PackStage.yml
+#   parameters:
+#     packProjects: $(_libraryProjects)
 
-- template: templates/CodeSignStage.yml
+# - template: templates/CodeSignStage.yml
 
-- template: templates/PublishStage.yml
+# - template: templates/PublishStage.yml
