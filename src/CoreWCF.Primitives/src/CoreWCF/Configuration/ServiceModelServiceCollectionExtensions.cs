@@ -93,6 +93,7 @@ namespace CoreWCF.Configuration
             services.AddSingleton(typeof(TransportCompressionSupportHelper));
             services.AddSingleton(typeof(ServiceDescription<>));
             services.AddSingleton(typeof(ServiceModelOptions));
+            services.ConfigureOptions<ConfigureKestrelOptions>();
             AddServicesForFederation(services);
             return services;
         }
