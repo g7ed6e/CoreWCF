@@ -710,7 +710,7 @@ namespace Helpers
                 encoder = new BinaryMessageEncodingBindingElement().CreateMessageEncoderFactory().Encoder;
             }
 
-            BufferManager bufferManager = BufferManager.CreateBufferManager(int.MaxValue, int.MaxValue);
+            BufferManager bufferManager = BufferManager.CreateBufferManager(524288L, int.MaxValue);
             ArraySegment<byte> encodedMessage = encoder.WriteMessage(toSend, int.MaxValue, bufferManager);
             Message r = encoder.ReadMessage(encodedMessage, bufferManager);
             return r;
