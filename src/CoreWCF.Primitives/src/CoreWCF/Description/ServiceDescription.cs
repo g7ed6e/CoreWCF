@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Linq.Expressions;
+using System.Reflection;
 using CoreWCF.Collections.Generic;
 using CoreWCF.Dispatcher;
 using CoreWCF.Runtime;
@@ -322,6 +324,12 @@ namespace CoreWCF.Description
             ServiceProvider = services;
             // Clone IServiceBehavior DI services implementing ICloneable to allow per service override.
             var behaviors = injectedBehaviors.ToList();
+
+            if (Environment.Version.Major >= 8)
+            {
+                behaviors.AddRange(GetKeyedServiceBehaviorsDelegate.Value.Invoke(services));
+            }
+
             for (int i = 0; i < behaviors.Count; i++)
             {
                 if(behaviors[i] is ICloneable cloneable)
@@ -333,5 +341,20 @@ namespace CoreWCF.Description
             AddBehaviors<TService>(this, behaviors);
             SetupSingleton<TService>(this, services);
         }
+
+        private static Lazy<Func<IServiceProvider, IEnumerable<IServiceBehavior>>> GetKeyedServiceBehaviorsDelegate = new(() =>
+        {
+            Assembly assembly = Assembly.Load("Microsoft.Extensions.DependencyInjection.Abstractions");
+            Type type = assembly.GetType("Microsoft.Extensions.DependencyInjection.IKeyedServiceProvider");
+            ParameterExpression parameter = Expression.Parameter(typeof(IServiceProvider));
+            UnaryExpression cast = Expression.TypeAs(parameter, type);
+            Expression invocation = Expression.Call(
+                cast, "GetKeyedService", new Type[] { },
+                Expression.Constant(typeof(IEnumerable<IServiceBehavior>)),
+                Expression.Constant(typeof(TService)));
+            UnaryExpression cast2 = Expression.TypeAs(invocation, typeof(IEnumerable<IServiceBehavior>));
+            var lambda = Expression.Lambda<Func<IServiceProvider, IEnumerable<IServiceBehavior>>>(cast2, parameter);
+            return lambda.Compile();
+        });
     }
 }
