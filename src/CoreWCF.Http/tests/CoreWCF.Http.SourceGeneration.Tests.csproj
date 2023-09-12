@@ -6,6 +6,7 @@
     <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
     <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
     <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+    <EnableCoreWCFOperationInvokerGenerator>true</EnableCoreWCFOperationInvokerGenerator>
     <!-- Required for multi-framework support for in-memory integration testing-->
     <OutputType>Exe</OutputType>
     <GenerateProgramFile>false</GenerateProgramFile>
@@ -55,5 +56,16 @@
     <ProjectReference Include="$(SourceDir)CoreWCF.Primitives\src\CoreWCF.Primitives.csproj" />
     <ProjectReference Include="..\src\CoreWCF.Http.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="**/*.NoSourceGeneration.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\CoreWCF.BuildTools\src\CoreWCF.BuildTools.Roslyn4.0.csproj" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+  <Import Project="$(SourceDir)CoreWCF.Primitives\src\CoreWCF.Primitives.props" />
+  <Import Project="$(SourceDir)CoreWCF.Primitives\src\CoreWCF.Primitives.targets" />
 
 </Project>
