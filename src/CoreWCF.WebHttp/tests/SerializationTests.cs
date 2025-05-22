@@ -4,6 +4,8 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 using CoreWCF.Configuration;
 using Helpers;
@@ -71,6 +73,29 @@ namespace CoreWCF.WebHttp.Tests
 
                 Assert.Equal(order, content);
                 Assert.Equal(HttpStatusCode.OK, statusCode);
+            }
+        }
+
+        [Theory]
+        [InlineData("{\"BoolValue\": true, \"StringValue\": \"asd\"")]
+        [InlineData("{\"BoolValue\": true, \"StringValue\": \"asd\",\n")]
+        [InlineData("{\"BoolValue\": true, \"StringValue\": \"asd\",,,\n")]
+        public async Task PostInvalidJson_ReturnsError(string invalidJson)
+        {
+            IWebHost host = ServiceHelper.CreateWebHostBuilder<Startup>(_output).Build();
+            using (host)
+            {
+                await host.StartAsync();
+                using (HttpClient httpClient = new HttpClient())
+                {
+                    httpClient.BaseAddress = host.GetHttpBaseAddressUri();
+                    using StringContent requestContent = new StringContent(invalidJson, Encoding.UTF8, "application/json");
+                    HttpResponseMessage response = await httpClient.PostAsync("api/json", requestContent);
+                    Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+                    // Optionnel : vérifier le contenu du message d'erreur
+                    string content = await response.Content.ReadAsStringAsync();
+                    Assert.False(string.IsNullOrWhiteSpace(content));
+                }
             }
         }
 

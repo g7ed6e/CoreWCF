@@ -8,6 +8,8 @@ using System.Runtime.Serialization.Json;
 using System.Xml;
 using CoreWCF.Channels;
 using CoreWCF.Description;
+using CoreWCF.Web;
+using System.Net;
 
 namespace CoreWCF.Dispatcher
 {
@@ -104,90 +106,109 @@ namespace CoreWCF.Dispatcher
 
         protected override object DeserializeBody(XmlDictionaryReader reader, MessageVersion version, string action, MessageDescription messageDescription, object[] parameters, bool isRequest)
         {
-            if (reader == null)
+            try
             {
-                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new ArgumentNullException(nameof(reader)));
-            }
-
-            if (parameters == null)
-            {
-                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new ArgumentNullException(nameof(parameters)));
-            }
-
-            if (reader.EOF)
-            {
-                return null;
-            }
-
-            if ((isRequest && _isBareMessageContractRequest) || (!isRequest && _isBareMessageContractReply))
-            {
-                return DeserializeBareMessageContract(reader, parameters, isRequest);
-            }
-
-            object returnValue = null;
-
-            if (isRequest || _isWrapped)
-            {
-                ValidateTypeObjectAttribute(reader, isRequest);
-                returnValue = DeserializeBodyCore(reader, parameters, isRequest);
-            }
-            else
-            {
-                if (replyMessageInfo.ReturnPart != null)
+                if (reader == null)
                 {
-                    PartInfo part = replyMessageInfo.ReturnPart;
-                    DataContractJsonSerializer serializer = part.Serializer as DataContractJsonSerializer;
-
-                    serializer = RecreateDataContractJsonSerializer(serializer, part.ContractType, JsonGlobals.RootString);
-                    VerifyIsStartElement(reader, JsonGlobals.RootString);
-
-                    if (serializer.IsStartObject(reader))
-                    {
-                        try
-                        {
-                            returnValue = part.ReadObject(reader, serializer);
-                        }
-                        catch (InvalidOperationException e)
-                        {
-                            throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new InvalidOperationException(
-                                SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameter, part.Description.Namespace, part.Description.Name), e));
-                        }
-                        catch (InvalidDataContractException e)
-                        {
-                            throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new InvalidDataContractException(
-                                SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameter, part.Description.Namespace, part.Description.Name), e));
-                        }
-                        catch (FormatException e)
-                        {
-                            throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
-                                NetDispatcherFaultException.CreateDeserializationFailedFault(
-                                SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameterMore,
-                                part.Description.Namespace, part.Description.Name, e.Message),
-                                e));
-                        }
-                        catch (SerializationException e)
-                        {
-                            throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
-                                NetDispatcherFaultException.CreateDeserializationFailedFault(
-                                SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameterMore,
-                                part.Description.Namespace, part.Description.Name, e.Message),
-                                e));
-                        }
-                    }
+                    throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new ArgumentNullException(nameof(reader)));
                 }
-                else if (replyMessageInfo.BodyParts != null)
+
+                if (parameters == null)
+                {
+                    throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new ArgumentNullException(nameof(parameters)));
+                }
+
+                if (reader.EOF)
+                {
+                    return null;
+                }
+
+                if ((isRequest && _isBareMessageContractRequest) || (!isRequest && _isBareMessageContractReply))
+                {
+                    return DeserializeBareMessageContract(reader, parameters, isRequest);
+                }
+
+                object returnValue = null;
+
+                if (isRequest || _isWrapped)
                 {
                     ValidateTypeObjectAttribute(reader, isRequest);
                     returnValue = DeserializeBodyCore(reader, parameters, isRequest);
                 }
-
-                while (reader.IsStartElement())
+                else
                 {
-                    TraceAndSkipElement(reader);
-                }
-            }
+                    if (replyMessageInfo.ReturnPart != null)
+                    {
+                        PartInfo part = replyMessageInfo.ReturnPart;
+                        DataContractJsonSerializer serializer = part.Serializer as DataContractJsonSerializer;
 
-            return returnValue;
+                        serializer = RecreateDataContractJsonSerializer(serializer, part.ContractType, JsonGlobals.RootString);
+                        VerifyIsStartElement(reader, JsonGlobals.RootString);
+
+                        if (serializer.IsStartObject(reader))
+                        {
+                            try
+                            {
+                                returnValue = part.ReadObject(reader, serializer);
+                            }
+                            catch (InvalidOperationException e)
+                            {
+                                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new InvalidOperationException(
+                                    SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameter, part.Description.Namespace, part.Description.Name), e));
+                            }
+                            catch (InvalidDataContractException e)
+                            {
+                                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new InvalidDataContractException(
+                                    SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameter, part.Description.Namespace, part.Description.Name), e));
+                            }
+                            catch (FormatException e)
+                            {
+                                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
+                                    NetDispatcherFaultException.CreateDeserializationFailedFault(
+                                    SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameterMore,
+                                    part.Description.Namespace, part.Description.Name, e.Message),
+                                    e));
+                            }
+                            catch (SerializationException e)
+                            {
+                                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
+                                    NetDispatcherFaultException.CreateDeserializationFailedFault(
+                                    SR.Format(SR.SFxInvalidMessageBodyErrorDeserializingParameterMore,
+                                    part.Description.Namespace, part.Description.Name, e.Message),
+                                    e));
+                            }
+                        }
+                    }
+                    else if (replyMessageInfo.BodyParts != null)
+                    {
+                        ValidateTypeObjectAttribute(reader, isRequest);
+                        returnValue = DeserializeBodyCore(reader, parameters, isRequest);
+                    }
+
+                    while (reader.IsStartElement())
+                    {
+                        TraceAndSkipElement(reader);
+                    }
+                }
+
+                return returnValue;
+            }
+            catch (SerializationException ex)
+            {
+                if (WebOperationContext.Current != null)
+                {
+                    WebOperationContext.Current.OutgoingResponse.StatusCode = HttpStatusCode.BadRequest;
+                }
+                throw new FaultException($"Invalid JSON payload: {ex.Message}");
+            }
+            catch (Exception ex) when (ex is XmlException || ex is FormatException)
+            {
+                if (WebOperationContext.Current != null)
+                {
+                    WebOperationContext.Current.OutgoingResponse.StatusCode = HttpStatusCode.BadRequest;
+                }
+                throw new FaultException($"Invalid JSON payload: {ex.Message}");
+            }
         }
 
         protected override void GetHeadersFromMessage(Message message, MessageDescription messageDescription, object[] parameters, bool isRequest)

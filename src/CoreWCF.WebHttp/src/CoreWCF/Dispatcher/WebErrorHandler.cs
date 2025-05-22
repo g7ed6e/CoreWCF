@@ -39,9 +39,15 @@ namespace CoreWCF.Dispatcher
                 return;
             }
 
-            // If the exception is not derived from FaultException and the fault message is already present
-            //   then only another error handler could have provided the fault so we should not replace it
             FaultException errorAsFaultException = error as FaultException;
+            if (errorAsFaultException != null)
+            {
+                // Pour toute FaultException (y compris celles levées pour JSON invalide), retourner 400 BadRequest
+                WebOperationContext.Current.OutgoingResponse.StatusCode = HttpStatusCode.BadRequest;
+                fault = CreateHtmlResponse(error);
+                return;
+            }
+
             if (errorAsFaultException == null && fault != null)
             {
                 return;
