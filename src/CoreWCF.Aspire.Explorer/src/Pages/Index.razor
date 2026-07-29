@@ -1,0 +1,169 @@
+@page "/"
+@inject ServiceCatalog Catalog
+@inject WsdlExplorerService Explorer
+@inject SoapInvoker Invoker
+
+<div class="explorer">
+    <aside class="sidebar">
+        <h2>Services</h2>
+        @if (Catalog.Services.Count == 0)
+        {
+            <p class="muted">No CoreWCF services were configured. Register services with
+                <code>WithCoreWcfService(...)</code> in the Aspire AppHost.</p>
+        }
+        else
+        {
+            <ul class="service-list">
+                @foreach (var service in Catalog.Services)
+                {
+                    <li>
+                        <button class="link @(ReferenceEquals(service, _selectedService) ? "active" : "")"
+                                @onclick="() => SelectServiceAsync(service)">
+                            @service.Name
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (_loadingWsdl)
+        {
+            <p class="muted">Loading WSDL&hellip;</p>
+        }
+        else if (_loadError is not null)
+        {
+            <p class="error">@_loadError</p>
+        }
+        else if (_model is not null)
+        {
+            @foreach (var contract in _model.Contracts)
+            {
+                <div class="contract">
+                    <h3>@contract.Name</h3>
+                    <ul class="operation-list">
+                        @foreach (var operation in contract.Operations)
+                        {
+                            <li>
+                                <button class="link @(ReferenceEquals(operation, _selectedOperation) ? "active" : "")"
+                                        @onclick="() => SelectOperation(operation)">
+                                    @operation.Name
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        }
+    </aside>
+
+    <section class="detail">
+        @if (_selectedOperation is null)
+        {
+            <p class="muted">Select an operation to inspect and invoke it.</p>
+        }
+        else
+        {
+            <h2>@_selectedOperation.Name</h2>
+            <dl class="meta">
+                <dt>SOAP version</dt>
+                <dd>@(_selectedOperation.SoapVersion == SoapVersion.Soap12 ? "1.2" : "1.1")</dd>
+                <dt>SOAPAction</dt>
+                <dd><code>@(_selectedOperation.SoapAction is { Length: > 0 } action ? action : "(none)")</code></dd>
+                <dt>Endpoint</dt>
+                <dd><code>@_selectedService?.EndpointAddress</code></dd>
+            </dl>
+
+            <h3>Request</h3>
+            <textarea class="editor" @bind="_requestEnvelope" spellcheck="false"></textarea>
+
+            <div class="actions">
+                <button class="primary" @onclick="InvokeAsync" disabled="@_invoking">
+                    @(_invoking ? "Invoking…" : "Invoke")
+                </button>
+            </div>
+
+            @if (_result is not null)
+            {
+                <h3>Response
+                    <span class="status @(_result.IsSuccess ? "ok" : "fail")">
+                        @_result.StatusCode @_result.ReasonPhrase &middot; @($"{_result.Elapsed.TotalMilliseconds:F0} ms")
+                    </span>
+                </h3>
+                <pre class="response">@_result.Body</pre>
+            }
+            else if (_invokeError is not null)
+            {
+                <p class="error">@_invokeError</p>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    private CoreWcfServiceDescriptor? _selectedService;
+    private WsdlModel? _model;
+    private WsdlOperation? _selectedOperation;
+    private string _requestEnvelope = string.Empty;
+    private SoapInvocationResult? _result;
+    private bool _loadingWsdl;
+    private bool _invoking;
+    private string? _loadError;
+    private string? _invokeError;
+
+    private async Task SelectServiceAsync(CoreWcfServiceDescriptor service)
+    {
+        _selectedService = service;
+        _selectedOperation = null;
+        _model = null;
+        _result = null;
+        _loadError = null;
+        _invokeError = null;
+        _loadingWsdl = true;
+
+        try
+        {
+            _model = await Explorer.LoadAsync(service);
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"Failed to load WSDL: {ex.Message}";
+        }
+        finally
+        {
+            _loadingWsdl = false;
+        }
+    }
+
+    private void SelectOperation(WsdlOperation operation)
+    {
+        _selectedOperation = operation;
+        _requestEnvelope = operation.SampleRequestEnvelope;
+        _result = null;
+        _invokeError = null;
+    }
+
+    private async Task InvokeAsync()
+    {
+        if (_selectedService is null || _selectedOperation is null)
+        {
+            return;
+        }
+
+        _invoking = true;
+        _result = null;
+        _invokeError = null;
+
+        try
+        {
+            _result = await Invoker.InvokeAsync(_selectedService.EndpointAddress, _selectedOperation, _requestEnvelope);
+        }
+        catch (Exception ex)
+        {
+            _invokeError = $"Invocation failed: {ex.Message}";
+        }
+        finally
+        {
+            _invoking = false;
+        }
+    }
+}

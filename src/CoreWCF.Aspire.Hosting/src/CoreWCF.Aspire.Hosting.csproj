@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>CoreWCF.Aspire.Hosting</AssemblyName>
+    <PackageId>CoreWCF.Aspire.Hosting</PackageId>
+    <RootNamespace>CoreWCF.Aspire.Hosting</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Directory.Build.props pins C# 11 for the netstandard2.0 libraries; Aspire integration uses C# 12 features. -->
+    <LangVersion>12.0</LangVersion>
+    <!-- net8.0 Aspire integration; the shared netstandard2.0 CoreWCF sources are not applicable here. -->
+    <IncludeCommonCode>false</IncludeCommonCode>
+    <Description>.NET Aspire hosting integration for CoreWCF. Adds a SOAP service explorer to the Aspire dashboard so CoreWCF services orchestrated by an Aspire AppHost can be browsed and invoked.</Description>
+    <PackageTags>CoreWCF WCF SOAP Aspire hosting dashboard explorer</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+  </ItemGroup>
+
+</Project>

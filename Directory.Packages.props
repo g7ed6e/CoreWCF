@@ -7,6 +7,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Nerdbank.GitVersioning" Version="3.9.50" />
+    <!-- .NET Aspire hosting integration (CoreWCF.Aspire.Hosting / Explorer). Aspire 9.5.x targets net8.0. -->
+    <PackageVersion Include="Aspire.Hosting" Version="9.5.2" />
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="9.5.2" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="9.5.2" />
     <PackageVersion Include="AngleSharp" Version="1.4.0" />
     <PackageVersion Include="AngleSharp.Diffing" Version="1.1.1" />
     <PackageVersion Include="Confluent.Kafka" Version="2.14.0" />

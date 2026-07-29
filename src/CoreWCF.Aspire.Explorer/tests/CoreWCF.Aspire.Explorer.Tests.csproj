@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>$(TestTargetFrameworks)</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12.0</LangVersion>
+    <IsPackable>false</IsPackable>
+    <!-- Self-contained tests: an in-process CoreWCF host plus the explorer's parsing/invocation logic. -->
+    <ReferenceCommonTestProject>false</ReferenceCommonTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WebApplication is used to host a CoreWCF service in-process for the tests. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../src/CoreWCF.Aspire.Explorer.csproj" />
+    <ProjectReference Include="../../CoreWCF.Primitives/src/CoreWCF.Primitives.csproj" />
+    <ProjectReference Include="../../CoreWCF.Http/src/CoreWCF.Http.csproj" />
+  </ItemGroup>
+
+</Project>
