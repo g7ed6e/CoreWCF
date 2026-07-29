@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12.0</LangVersion>
     <IsPackable>false</IsPackable>
+    <!-- Matches the explorer app: ASP.NET Core assemblies come from the shared framework. -->
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
     <!-- Self-contained tests: an in-process CoreWCF host plus the explorer's parsing/invocation logic. -->
     <ReferenceCommonTestProject>false</ReferenceCommonTestProject>
   </PropertyGroup>

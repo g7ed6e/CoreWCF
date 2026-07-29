@@ -44,4 +44,38 @@ public sealed class WsdlOperation
 
     /// <summary>A best-effort sample SOAP request envelope, ready to edit and send.</summary>
     public string SampleRequestEnvelope { get; set; } = string.Empty;
+
+    /// <summary>Local name of the request wrapper element (document/literal wrapped).</summary>
+    public string? RequestWrapperName { get; set; }
+
+    /// <summary>Namespace of the request wrapper element.</summary>
+    public string? RequestWrapperNamespace { get; set; }
+
+    /// <summary>The request parameters (immediate children of the wrapper element).</summary>
+    public List<WsdlParameter> RequestParameters { get; } = new();
+
+    /// <summary>
+    /// True when the request has a resolved wrapper and every parameter is a simple type, so the
+    /// "Formatted" parameter grid can build the request. Otherwise the XML view must be used.
+    /// </summary>
+    public bool CanUseFormattedRequest { get; set; }
+}
+
+/// <summary>A single request parameter (Name / Type / Value), as shown in the formatted request grid.</summary>
+public sealed class WsdlParameter
+{
+    public string Name { get; set; } = string.Empty;
+
+    public string Namespace { get; set; } = string.Empty;
+
+    /// <summary>Display type name (for example <c>string</c>, <c>int</c>).</summary>
+    public string TypeName { get; set; } = "string";
+
+    public bool IsSimple { get; set; } = true;
+
+    /// <summary>Sample/default value.</summary>
+    public string SampleValue { get; set; } = string.Empty;
+
+    /// <summary>The current, user-editable value.</summary>
+    public string Value { get; set; } = string.Empty;
 }

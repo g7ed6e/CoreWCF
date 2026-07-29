@@ -42,6 +42,45 @@ public class WsdlExplorerServiceTests : IClassFixture<EchoServiceFixture>
     }
 
     [Fact]
+    public async Task LoadAsync_ExtractsSimpleParameters()
+    {
+        using var http = new HttpClient();
+        var service = new WsdlExplorerService(http, NullLogger<WsdlExplorerService>.Instance);
+
+        var model = await service.LoadAsync(Descriptor);
+        var echo = model.Contracts.SelectMany(c => c.Operations).Single(o => o.Name == "Echo");
+
+        Assert.True(echo.CanUseFormattedRequest);
+        var parameter = Assert.Single(echo.RequestParameters);
+        Assert.Equal("text", parameter.Name);
+        Assert.Equal("string", parameter.TypeName);
+        Assert.True(parameter.IsSimple);
+    }
+
+    [Fact]
+    public async Task Invoke_UsingFormattedParameters_RoundTrips()
+    {
+        using var http = new HttpClient();
+        var explorer = new WsdlExplorerService(http, NullLogger<WsdlExplorerService>.Instance);
+        var model = await explorer.LoadAsync(Descriptor);
+        var echo = model.Contracts.SelectMany(c => c.Operations).Single(o => o.Name == "Echo");
+
+        echo.RequestParameters.Single().Value = "Bonjour";
+        var envelope = SoapRequestBuilder.BuildEnvelope(echo);
+
+        using var invokeHttp = new HttpClient();
+        var invoker = new SoapInvoker(invokeHttp);
+        var result = await invoker.InvokeAsync(Descriptor.EndpointAddress, echo, envelope);
+
+        Assert.True(result.IsSuccess, $"Expected success but got {result.StatusCode}: {result.Body}");
+        Assert.Contains("You said: Bonjour", result.Body);
+
+        var parsed = SoapResponseParser.Parse(result.Body);
+        Assert.False(parsed.IsFault);
+        Assert.Contains(parsed.Rows, r => r.Value.Contains("You said: Bonjour"));
+    }
+
+    [Fact]
     public async Task Invoke_RoundTripsThroughTheService()
     {
         using var http = new HttpClient();

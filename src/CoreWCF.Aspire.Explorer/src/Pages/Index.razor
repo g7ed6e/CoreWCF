@@ -4,141 +4,214 @@
 @inject SoapInvoker Invoker
 
 <div class="explorer">
-    <aside class="sidebar">
-        <h2>Services</h2>
-        @if (Catalog.Services.Count == 0)
-        {
-            <p class="muted">No CoreWCF services were configured. Register services with
-                <code>WithCoreWcfService(...)</code> in the Aspire AppHost.</p>
-        }
-        else
-        {
-            <ul class="service-list">
-                @foreach (var service in Catalog.Services)
+    <FluentSplitter Orientation="Orientation.Horizontal" Panel1Size="340px" Panel1MinSize="240px" BarSize="4">
+        <Panel1>
+            <div class="tree-pane">
+                <FluentLabel Typo="Typography.PaneHeader" Class="pane-title">My Service Projects</FluentLabel>
+
+                @if (Catalog.Services.Count == 0)
                 {
-                    <li>
-                        <button class="link @(ReferenceEquals(service, _selectedService) ? "active" : "")"
-                                @onclick="() => SelectServiceAsync(service)">
-                            @service.Name
-                        </button>
-                    </li>
+                    <FluentLabel Class="muted">
+                        No CoreWCF services were configured. Register services with
+                        <code>WithCoreWcfService(...)</code> in the Aspire AppHost.
+                    </FluentLabel>
                 }
-            </ul>
-        }
-
-        @if (_loadingWsdl)
-        {
-            <p class="muted">Loading WSDL&hellip;</p>
-        }
-        else if (_loadError is not null)
-        {
-            <p class="error">@_loadError</p>
-        }
-        else if (_model is not null)
-        {
-            @foreach (var contract in _model.Contracts)
-            {
-                <div class="contract">
-                    <h3>@contract.Name</h3>
-                    <ul class="operation-list">
-                        @foreach (var operation in contract.Operations)
+                else
+                {
+                    <FluentTreeView>
+                        @foreach (var service in Catalog.Services)
                         {
-                            <li>
-                                <button class="link @(ReferenceEquals(operation, _selectedOperation) ? "active" : "")"
-                                        @onclick="() => SelectOperation(operation)">
-                                    @operation.Name
-                                </button>
-                            </li>
+                            <FluentTreeItem @onclick="() => ToggleServiceAsync(service)" InitiallyExpanded="false">
+                                <span class="svc">@service.Name</span>
+
+                                @if (_loading.Contains(service.Name))
+                                {
+                                    <FluentTreeItem Disabled="true">Loading WSDL&hellip;</FluentTreeItem>
+                                }
+                                else if (_errors.TryGetValue(service.Name, out var error) && error is not null)
+                                {
+                                    <FluentTreeItem Disabled="true">@error</FluentTreeItem>
+                                }
+                                else if (_models.TryGetValue(service.Name, out var model) && model is not null)
+                                {
+                                    @foreach (var contract in model.Contracts)
+                                    {
+                                        <FluentTreeItem Text="@contract.Name" InitiallyExpanded="true">
+                                            @foreach (var operation in contract.Operations)
+                                            {
+                                                <FluentTreeItem @onclick="() => SelectOperation(service, operation)"
+                                                                class="@(ReferenceEquals(operation, _selectedOperation) ? "op selected" : "op")">
+                                                    @operation.Name
+                                                </FluentTreeItem>
+                                            }
+                                        </FluentTreeItem>
+                                    }
+                                }
+                            </FluentTreeItem>
                         }
-                    </ul>
-                </div>
-            }
-        }
-    </aside>
-
-    <section class="detail">
-        @if (_selectedOperation is null)
-        {
-            <p class="muted">Select an operation to inspect and invoke it.</p>
-        }
-        else
-        {
-            <h2>@_selectedOperation.Name</h2>
-            <dl class="meta">
-                <dt>SOAP version</dt>
-                <dd>@(_selectedOperation.SoapVersion == SoapVersion.Soap12 ? "1.2" : "1.1")</dd>
-                <dt>SOAPAction</dt>
-                <dd><code>@(_selectedOperation.SoapAction is { Length: > 0 } action ? action : "(none)")</code></dd>
-                <dt>Endpoint</dt>
-                <dd><code>@_selectedService?.EndpointAddress</code></dd>
-            </dl>
-
-            <h3>Request</h3>
-            <textarea class="editor" @bind="_requestEnvelope" spellcheck="false"></textarea>
-
-            <div class="actions">
-                <button class="primary" @onclick="InvokeAsync" disabled="@_invoking">
-                    @(_invoking ? "Invoking…" : "Invoke")
-                </button>
+                    </FluentTreeView>
+                }
             </div>
+        </Panel1>
 
-            @if (_result is not null)
-            {
-                <h3>Response
-                    <span class="status @(_result.IsSuccess ? "ok" : "fail")">
-                        @_result.StatusCode @_result.ReasonPhrase &middot; @($"{_result.Elapsed.TotalMilliseconds:F0} ms")
-                    </span>
-                </h3>
-                <pre class="response">@_result.Body</pre>
-            }
-            else if (_invokeError is not null)
-            {
-                <p class="error">@_invokeError</p>
-            }
-        }
-    </section>
+        <Panel2>
+            <div class="detail-pane">
+                @if (_selectedOperation is null)
+                {
+                    <FluentLabel Class="muted">Select an operation to build a request and invoke it.</FluentLabel>
+                }
+                else
+                {
+                    <FluentLabel Typo="Typography.H4">@_selectedOperation.Name</FluentLabel>
+                    <div class="meta">
+                        <span class="k">Endpoint</span><span class="v"><code>@_selectedService?.EndpointAddress</code></span>
+                        <span class="k">SOAP</span><span class="v">@(_selectedOperation.SoapVersion == SoapVersion.Soap12 ? "1.2" : "1.1")</span>
+                        <span class="k">Action</span><span class="v"><code>@(_selectedOperation.SoapAction is { Length: > 0 } a ? a : "(none)")</code></span>
+                    </div>
+
+                    <FluentCard Class="card">
+                        <FluentLabel Typo="Typography.H6">Request</FluentLabel>
+                        <FluentTabs @bind-ActiveTabId="_requestTab">
+                            <FluentTab Id="req-formatted" Label="Formatted">
+                                @if (_selectedOperation.CanUseFormattedRequest)
+                                {
+                                    @if (_selectedOperation.RequestParameters.Count == 0)
+                                    {
+                                        <FluentLabel class="muted">This operation takes no parameters.</FluentLabel>
+                                    }
+                                    else
+                                    {
+                                        <table class="grid">
+                                            <thead><tr><th>Name</th><th>Type</th><th>Value</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var parameter in _selectedOperation.RequestParameters)
+                                                {
+                                                    <tr>
+                                                        <td>@parameter.Name</td>
+                                                        <td class="type">@parameter.TypeName</td>
+                                                        <td><FluentTextField @bind-Value="parameter.Value" class="cell-input" /></td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    }
+                                }
+                                else
+                                {
+                                    <FluentLabel class="muted">
+                                        This operation has complex parameters. Edit the request in the XML tab.
+                                    </FluentLabel>
+                                }
+                            </FluentTab>
+                            <FluentTab Id="req-xml" Label="XML">
+                                <FluentTextArea @bind-Value="_requestEnvelope" Rows="16" Class="editor" Spellcheck="false" />
+                            </FluentTab>
+                        </FluentTabs>
+                    </FluentCard>
+
+                    <div class="actions">
+                        <FluentButton Appearance="Appearance.Accent" @onclick="InvokeAsync" Loading="_invoking" Disabled="_invoking">
+                            Invoke
+                        </FluentButton>
+                    </div>
+
+                    @if (_invokeError is not null)
+                    {
+                        <FluentLabel Class="error">@_invokeError</FluentLabel>
+                    }
+                    else if (_result is not null)
+                    {
+                        <FluentCard Class="card">
+                            <div class="resp-head">
+                                <FluentLabel Typo="Typography.H6">Response</FluentLabel>
+                                <span class="status @(_result.IsSuccess ? "ok" : "fail")">
+                                    @_result.StatusCode @_result.ReasonPhrase &middot; @($"{_result.Elapsed.TotalMilliseconds:F0} ms")
+                                </span>
+                            </div>
+                            <FluentTabs @bind-ActiveTabId="_responseTab">
+                                <FluentTab Id="resp-formatted" Label="Formatted">
+                                    @if (_parsed is { IsFault: true })
+                                    {
+                                        <FluentLabel Class="error">Fault: @_parsed.FaultText</FluentLabel>
+                                    }
+                                    else if (_parsed is { Rows.Count: > 0 })
+                                    {
+                                        <table class="grid">
+                                            <thead><tr><th>Name</th><th>Value</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var row in _parsed.Rows)
+                                                {
+                                                    <tr><td>@row.Name</td><td class="val">@row.Value</td></tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    }
+                                    else
+                                    {
+                                        <FluentLabel class="muted">No structured content; see the XML tab.</FluentLabel>
+                                    }
+                                </FluentTab>
+                                <FluentTab Id="resp-xml" Label="XML">
+                                    <pre class="response">@_result.Body</pre>
+                                </FluentTab>
+                            </FluentTabs>
+                        </FluentCard>
+                    }
+                }
+            </div>
+        </Panel2>
+    </FluentSplitter>
 </div>
 
 @code {
+    private readonly Dictionary<string, WsdlModel?> _models = new();
+    private readonly Dictionary<string, string?> _errors = new();
+    private readonly HashSet<string> _loading = new();
+
     private CoreWcfServiceDescriptor? _selectedService;
-    private WsdlModel? _model;
     private WsdlOperation? _selectedOperation;
+
+    private string _requestTab = "req-formatted";
+    private string _responseTab = "resp-formatted";
     private string _requestEnvelope = string.Empty;
-    private SoapInvocationResult? _result;
-    private bool _loadingWsdl;
+
     private bool _invoking;
-    private string? _loadError;
+    private SoapInvocationResult? _result;
+    private ParsedSoapResponse? _parsed;
     private string? _invokeError;
 
-    private async Task SelectServiceAsync(CoreWcfServiceDescriptor service)
+    private async Task ToggleServiceAsync(CoreWcfServiceDescriptor service)
     {
-        _selectedService = service;
-        _selectedOperation = null;
-        _model = null;
-        _result = null;
-        _loadError = null;
-        _invokeError = null;
-        _loadingWsdl = true;
+        if (_models.ContainsKey(service.Name) || _loading.Contains(service.Name))
+        {
+            return;
+        }
+
+        _loading.Add(service.Name);
+        _errors[service.Name] = null;
 
         try
         {
-            _model = await Explorer.LoadAsync(service);
+            _models[service.Name] = await Explorer.LoadAsync(service);
         }
         catch (Exception ex)
         {
-            _loadError = $"Failed to load WSDL: {ex.Message}";
+            _errors[service.Name] = $"Failed to load WSDL: {ex.Message}";
         }
         finally
         {
-            _loadingWsdl = false;
+            _loading.Remove(service.Name);
         }
     }
 
-    private void SelectOperation(WsdlOperation operation)
+    private void SelectOperation(CoreWcfServiceDescriptor service, WsdlOperation operation)
     {
+        _selectedService = service;
         _selectedOperation = operation;
         _requestEnvelope = operation.SampleRequestEnvelope;
+        _requestTab = operation.CanUseFormattedRequest ? "req-formatted" : "req-xml";
         _result = null;
+        _parsed = null;
         _invokeError = null;
     }
 
@@ -151,11 +224,17 @@
 
         _invoking = true;
         _result = null;
+        _parsed = null;
         _invokeError = null;
+
+        var envelope = _requestTab == "req-formatted" && _selectedOperation.CanUseFormattedRequest
+            ? SoapRequestBuilder.BuildEnvelope(_selectedOperation)
+            : _requestEnvelope;
 
         try
         {
-            _result = await Invoker.InvokeAsync(_selectedService.EndpointAddress, _selectedOperation, _requestEnvelope);
+            _result = await Invoker.InvokeAsync(_selectedService.EndpointAddress, _selectedOperation, envelope);
+            _parsed = SoapResponseParser.Parse(_result.Body);
         }
         catch (Exception ex)
         {

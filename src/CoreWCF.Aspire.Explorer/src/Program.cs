@@ -2,11 +2,13 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using CoreWCF.Aspire.Explorer.Services;
+using Microsoft.FluentUI.AspNetCore.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
+builder.Services.AddFluentUIComponents();
 
 builder.Services.AddSingleton<ServiceCatalog>();
 builder.Services.AddHttpClient<WsdlExplorerService>();

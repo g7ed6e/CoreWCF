@@ -1,10 +1,23 @@
 @inherits LayoutComponentBase
 
-<div class="page">
-    <header class="topbar">
-        <span class="brand">CoreWCF SOAP Explorer</span>
-    </header>
-    <main class="content">
+<FluentDesignTheme @bind-Mode="@_mode" CustomColor="#512BD4" StorageName="corewcf-explorer-theme" />
+
+<FluentLayout>
+    <FluentHeader>
+        <span class="app-title">CoreWCF SOAP Explorer</span>
+        <FluentSpacer />
+        <FluentButton Appearance="Appearance.Stealth" @onclick="ToggleTheme">
+            @(_mode == DesignThemeModes.Dark ? "Light theme" : "Dark theme")
+        </FluentButton>
+    </FluentHeader>
+    <FluentBodyContent>
         @Body
-    </main>
-</div>
+    </FluentBodyContent>
+</FluentLayout>
+
+@code {
+    private DesignThemeModes _mode = DesignThemeModes.System;
+
+    private void ToggleTheme() =>
+        _mode = _mode == DesignThemeModes.Dark ? DesignThemeModes.Light : DesignThemeModes.Dark;
+}

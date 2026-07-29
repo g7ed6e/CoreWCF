@@ -1,105 +1,165 @@
-:root {
-    --bg: #1e1e2e;
-    --panel: #27293d;
-    --border: #3a3d55;
-    --text: #e4e6f1;
-    --muted: #9aa0b5;
-    --accent: #4f9cf9;
-    --ok: #3fb950;
-    --fail: #f85149;
-}
-
-* { box-sizing: border-box; }
-
-body {
+html, body {
     margin: 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background: var(--bg);
-    color: var(--text);
+    font-family: var(--body-font, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif);
 }
 
-.topbar {
-    padding: 0.75rem 1.25rem;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
+.app-title {
+    font-weight: 600;
 }
 
-.brand { font-weight: 600; font-size: 1.05rem; }
-
+/* Fill the area below the Fluent header. */
 .explorer {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 1px;
-    background: var(--border);
-    min-height: calc(100vh - 52px);
+    height: calc(100vh - 50px);
 }
 
-.sidebar, .detail {
-    background: var(--bg);
+.explorer ::deep .fluent-splitter,
+.explorer > * {
+    height: 100%;
+}
+
+.tree-pane {
+    height: 100%;
+    padding: 0.75rem 0.9rem;
+    overflow: auto;
+    background: var(--neutral-layer-1);
+    border-right: 1px solid var(--neutral-stroke-rest);
+    box-sizing: border-box;
+}
+
+.detail-pane {
+    height: 100%;
     padding: 1rem 1.25rem;
     overflow: auto;
+    box-sizing: border-box;
 }
 
-h2 { font-size: 1rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-h3 { font-size: 0.95rem; margin-bottom: 0.35rem; }
+.pane-title {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--neutral-foreground-hint);
+}
 
-.service-list, .operation-list { list-style: none; margin: 0 0 1rem; padding: 0; }
-.operation-list { margin-left: 0.5rem; }
+.svc {
+    font-weight: 600;
+}
 
-.link {
-    background: none;
-    border: none;
-    color: var(--text);
-    cursor: pointer;
-    padding: 0.25rem 0.4rem;
+.op.selected {
+    color: var(--accent-fill-rest);
+    font-weight: 600;
+}
+
+.muted {
+    color: var(--neutral-foreground-hint);
+}
+
+.error {
+    color: var(--error, #d13438);
+}
+
+code {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 0.85em;
+}
+
+.meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.15rem 1rem;
+    margin: 0.4rem 0 1rem;
+}
+
+.meta .k {
+    color: var(--neutral-foreground-hint);
+}
+
+.card {
+    margin: 0.75rem 0;
+    padding: 0.9rem 1rem;
+}
+
+.actions {
+    margin: 0.75rem 0;
+}
+
+/* WCF Test Client-style parameter / response grid. */
+.grid {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.grid th,
+.grid td {
     text-align: left;
-    width: 100%;
-    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, var(--neutral-stroke-rest));
+    vertical-align: top;
 }
-.link:hover { background: var(--panel); }
-.link.active { background: var(--accent); color: #fff; }
 
-.muted { color: var(--muted); }
-.error { color: var(--fail); }
+.grid th {
+    color: var(--neutral-foreground-hint);
+    font-weight: 600;
+}
 
-.meta { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 1rem; margin: 0.5rem 0 1rem; }
-.meta dt { color: var(--muted); }
-.meta dd { margin: 0; }
+.grid .type {
+    color: var(--accent-fill-rest);
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 0.82rem;
+}
 
-.editor, .response {
+.grid .val {
+    font-family: 'Cascadia Code', Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.cell-input {
     width: 100%;
-    background: var(--panel);
-    color: var(--text);
-    border: 1px solid var(--border);
+}
+
+.editor {
+    width: 100%;
+    font-family: 'Cascadia Code', Consolas, monospace;
+}
+
+.resp-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+}
+
+.status {
+    font-size: 0.8rem;
+}
+
+.status.ok {
+    color: var(--success, #107c10);
+}
+
+.status.fail {
+    color: var(--error, #d13438);
+}
+
+.response {
+    background: var(--neutral-layer-2);
+    border: 1px solid var(--neutral-stroke-rest);
     border-radius: 6px;
     padding: 0.6rem;
+    white-space: pre-wrap;
+    word-break: break-word;
     font-family: 'Cascadia Code', Consolas, monospace;
     font-size: 0.85rem;
+    max-height: 420px;
+    overflow: auto;
 }
-.editor { min-height: 240px; resize: vertical; }
-.response { white-space: pre-wrap; word-break: break-word; }
-
-.actions { margin: 0.75rem 0; }
-.primary {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 0.5rem 1.1rem;
-    cursor: pointer;
-}
-.primary:disabled { opacity: 0.6; cursor: default; }
-
-.status { font-weight: 400; font-size: 0.8rem; margin-left: 0.5rem; }
-.status.ok { color: var(--ok); }
-.status.fail { color: var(--fail); }
-
-code { background: var(--panel); padding: 0.05rem 0.3rem; border-radius: 4px; }
 
 #blazor-error-ui {
     display: none;
     position: fixed;
-    bottom: 0; left: 0; right: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
     background: #b32121;
     color: #fff;
     padding: 0.6rem 1rem;

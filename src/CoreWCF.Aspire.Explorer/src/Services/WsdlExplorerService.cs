@@ -59,13 +59,24 @@ public sealed class WsdlExplorerService(HttpClient httpClient, ILogger<WsdlExplo
                 var requestElement = FindRequestElement(serviceDescription, operation);
                 var body = requestElement is not null ? sampleGenerator.Generate(requestElement) : null;
 
-                contract.Operations.Add(new WsdlOperation
+                var wsdlOperation = new WsdlOperation
                 {
                     Name = operation.Name,
                     SoapAction = soapAction,
                     SoapVersion = soapVersion,
                     SampleRequestEnvelope = SoapEnvelope.Wrap(body, soapVersion),
-                });
+                };
+
+                if (requestElement is not null)
+                {
+                    var shape = sampleGenerator.DescribeRequest(requestElement);
+                    wsdlOperation.RequestWrapperName = shape.WrapperName;
+                    wsdlOperation.RequestWrapperNamespace = shape.WrapperNamespace;
+                    wsdlOperation.RequestParameters.AddRange(shape.Parameters);
+                    wsdlOperation.CanUseFormattedRequest = shape.WrapperName is not null && shape.AllSimple;
+                }
+
+                contract.Operations.Add(wsdlOperation);
             }
 
             model.Contracts.Add(contract);

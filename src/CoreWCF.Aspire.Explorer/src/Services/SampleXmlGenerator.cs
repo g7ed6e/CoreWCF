@@ -6,8 +6,16 @@ using System.Collections.Generic;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Schema;
+using CoreWCF.Aspire.Explorer.Model;
 
 namespace CoreWCF.Aspire.Explorer.Services;
+
+/// <summary>The shape of an operation request: its wrapper element and immediate parameters.</summary>
+public sealed record OperationRequestShape(
+    string? WrapperName,
+    string? WrapperNamespace,
+    IReadOnlyList<WsdlParameter> Parameters,
+    bool AllSimple);
 
 /// <summary>
 /// Produces a best-effort sample XML instance for a global schema element, used to pre-fill the SOAP
@@ -40,6 +48,97 @@ public sealed class SampleXmlGenerator
     {
         var element = FindGlobalElement(elementName);
         return element is null ? null : BuildElement(element, 0, new HashSet<XmlQualifiedName>());
+    }
+
+    /// <summary>
+    /// Describes the request wrapper element and its immediate parameters, so the formatted parameter
+    /// grid (Name / Type / Value) can be rendered.
+    /// </summary>
+    public OperationRequestShape DescribeRequest(XmlQualifiedName wrapperElementName)
+    {
+        var element = FindGlobalElement(wrapperElementName);
+        if (element is null)
+        {
+            return new OperationRequestShape(null, null, Array.Empty<WsdlParameter>(), false);
+        }
+
+        var parameters = new List<WsdlParameter>();
+        var allSimple = true;
+
+        if (element.ElementSchemaType is XmlSchemaComplexType complex)
+        {
+            CollectParameters(complex.ContentTypeParticle, parameters, ref allSimple);
+        }
+        else
+        {
+            allSimple = false;
+        }
+
+        return new OperationRequestShape(
+            element.QualifiedName.Name,
+            element.QualifiedName.Namespace,
+            parameters,
+            allSimple);
+    }
+
+    private void CollectParameters(XmlSchemaParticle? particle, List<WsdlParameter> into, ref bool allSimple)
+    {
+        switch (particle)
+        {
+            case XmlSchemaElement element:
+                var resolved = ResolveElement(element);
+                if (resolved is null)
+                {
+                    allSimple = false;
+                    break;
+                }
+
+                var type = resolved.ElementSchemaType;
+                var isSimple = type is XmlSchemaSimpleType
+                    || (type is XmlSchemaComplexType complex && complex.ContentType == XmlSchemaContentType.TextOnly);
+                if (!isSimple)
+                {
+                    allSimple = false;
+                }
+
+                var sample = isSimple ? PlaceholderFor(type?.Datatype) : string.Empty;
+                into.Add(new WsdlParameter
+                {
+                    Name = resolved.QualifiedName.Name,
+                    Namespace = resolved.QualifiedName.Namespace,
+                    TypeName = TypeDisplay(type),
+                    IsSimple = isSimple,
+                    SampleValue = sample,
+                    Value = sample,
+                });
+                break;
+
+            case XmlSchemaGroupBase group:
+                foreach (XmlSchemaObject item in group.Items)
+                {
+                    if (item is XmlSchemaParticle childParticle)
+                    {
+                        CollectParameters(childParticle, into, ref allSimple);
+                    }
+                }
+
+                break;
+        }
+    }
+
+    private static string TypeDisplay(XmlSchemaType? type)
+    {
+        if (type is null)
+        {
+            return "string";
+        }
+
+        if (!type.QualifiedName.IsEmpty)
+        {
+            return type.QualifiedName.Name;
+        }
+
+        return type.Datatype is { } datatype ? datatype.TypeCode.ToString().ToLowerInvariant() : "complex";
     }
 
     private XmlSchemaElement? FindGlobalElement(XmlQualifiedName name)

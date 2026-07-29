@@ -10,6 +10,9 @@
     <!-- net8.0 web app; the shared netstandard2.0 CoreWCF sources are not applicable and it is not a NuGet package. -->
     <IncludeCommonCode>false</IncludeCommonCode>
     <IsPackable>false</IsPackable>
+    <!-- This net8.0 web app gets its ASP.NET Core assemblies from the shared framework; do not pin its
+         transitive dependencies to the netstandard2.0 versions the CoreWCF libraries declare centrally. -->
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
     <SignAssembly>false</SignAssembly>
     <!-- Enable `dotnet publish -t:PublishContainer` to produce the explorer image used by the hosting integration. -->
     <EnableSdkContainerSupport>true</EnableSdkContainerSupport>
@@ -18,6 +21,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.Web.Services.Description" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
   </ItemGroup>
 
 </Project>
