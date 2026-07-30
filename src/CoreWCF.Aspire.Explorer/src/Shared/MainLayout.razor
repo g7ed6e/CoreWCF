@@ -1,23 +1,43 @@
 @inherits LayoutComponentBase
 
+@* FluentDesignTheme restores the stored mode, so _mode self-corrects once the circuit starts. *@
 <FluentDesignTheme @bind-Mode="@_mode" CustomColor="#512BD4" StorageName="corewcf-explorer-theme" />
 
-<FluentLayout>
-    <FluentHeader>
+@* data-theme drives the token overrides in app.css. FluentDesignTheme does not set it itself, and
+   System mode deliberately leaves it off so the prefers-color-scheme fallback applies. *@
+<div class="layout" data-theme="@ThemeAttribute">
+    <header class="app-header">
+        <span class="app-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="20" height="20" fill="none" stroke="currentColor"
+                 stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11.4 10.6 6.8 16l4.6 5.4" />
+                <path d="M20.6 10.6 25.2 16l-4.6 5.4" />
+                <path d="M18.2 8.6 13.8 23.4" />
+            </svg>
+        </span>
         <span class="app-title">CoreWCF SOAP Explorer</span>
         <FluentSpacer />
-        <FluentButton Appearance="Appearance.Stealth" @onclick="ToggleTheme">
-            @(_mode == DesignThemeModes.Dark ? "Light theme" : "Dark theme")
-        </FluentButton>
-    </FluentHeader>
-    <FluentBodyContent>
+        <ThemeSelector Mode="_mode" ModeChanged="OnModeChanged" />
+    </header>
+
+    <main class="layout-body">
         @Body
-    </FluentBodyContent>
-</FluentLayout>
+    </main>
+</div>
+
+<FluentToastProvider Position="ToastPosition.TopRight" />
+<FluentTooltipProvider />
+<FluentMenuProvider />
 
 @code {
     private DesignThemeModes _mode = DesignThemeModes.System;
 
-    private void ToggleTheme() =>
-        _mode = _mode == DesignThemeModes.Dark ? DesignThemeModes.Light : DesignThemeModes.Dark;
+    private string? ThemeAttribute => _mode switch
+    {
+        DesignThemeModes.Light => "light",
+        DesignThemeModes.Dark => "dark",
+        _ => null,
+    };
+
+    private void OnModeChanged(DesignThemeModes mode) => _mode = mode;
 }

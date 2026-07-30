@@ -42,6 +42,18 @@ var metadata = app.Services.GetRequiredService<ServiceMetadataBehavior>();
 metadata.HttpGetEnabled = true; // or HttpsGetEnabled
 ```
 
+## Supported Aspire versions
+
+The package ships a single `lib/net8.0` assembly and depends on `Aspire.Hosting >= 9.5.2` with **no
+upper bound**. Aspire 13.x still ships `lib/net8.0`, so the same assembly serves both the 9.x and 13.x
+lines, and none of the APIs this integration uses changed between them.
+
+Tested in CI against **Aspire 9.5.2 and 13.4.6**: the `net8.0`/`net9.0` test legs resolve 9.5.2 and the
+`net10.0`/`net11.0` legs resolve 13.4.6, exercising the same shipped assembly against both.
+
+Note that the .NET version requirement comes from **your AppHost**, not from this package: the Aspire
+13.x `Aspire.AppHost.Sdk` requires a .NET 10 SDK, while the 9.x line works on .NET 8.
+
 ## API
 
 - `IDistributedApplicationBuilder.AddCoreWcfExplorer(name = "wcf-explorer", port?, imageTag?)` — adds the

@@ -1,19 +1,95 @@
+/* Token, reset and global-override layer. Component rules live in the matching .razor.css -
+   rules that target Fluent web-component internals (::part, .fluent-*) cannot be scoped. */
+
 html, body {
     margin: 0;
+    height: 100%;
     font-family: var(--body-font, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif);
 }
 
-.app-title {
-    font-weight: 600;
+/* Hide web components until they upgrade, so the page does not flash unstyled markup. */
+:not(:defined) {
+    visibility: hidden;
 }
 
-/* Fill the area below the Fluent header. */
-.explorer {
-    height: calc(100vh - 50px);
+* {
+    scrollbar-color: var(--scrollbar-color) transparent;
 }
 
-.explorer ::deep .fluent-splitter,
-.explorer > * {
+:root {
+    /* Spacing follows Aspire's idiom of scaling Fluent's --design-unit (4) rather than
+       introducing a separate scale. The fallback covers the pre-upgrade render. */
+    --space-1: calc(var(--design-unit, 4) * 1px);
+    --space-2: calc(var(--design-unit, 4) * 2px);
+    --space-3: calc(var(--design-unit, 4) * 3px);
+    --space-4: calc(var(--design-unit, 4) * 4px);
+    --space-6: calc(var(--design-unit, 4) * 6px);
+    --layout-left-padding: calc(var(--design-unit, 4) * 4.5px);
+    --layout-right-padding: calc(var(--design-unit, 4) * 2px);
+    --inline-icon-margin: 5px;
+
+    --radius-control: calc(var(--control-corner-radius, 4) * 1px);
+    --radius-layer: calc(var(--layer-corner-radius, 8) * 1px);
+
+    --mono-font: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+
+    /* Surfaces alias Fluent tokens, so they follow the theme with no branching. */
+    --surface-chrome: var(--neutral-layer-4);
+    --surface-panel: var(--neutral-layer-1);
+    --surface-code: var(--neutral-layer-3);
+    --stroke-divider: var(--neutral-stroke-divider-rest, var(--neutral-stroke-rest));
+
+    /* The only genuinely theme-branched values. Status colours are used on icons, borders and
+       accents only - never on text, which would fail contrast in dark. */
+    --scrollbar-color: #8B8B8B;
+    --foreground-subtext-rest: #5D5D5D;
+    --status-success: #108310;
+    --status-error: #D13438;
+}
+
+.layout[data-theme="dark"] {
+    --scrollbar-color: #9F9F9F;
+    --foreground-subtext-rest: #8D8D8D;
+    --status-error: #E10B11;
+}
+
+/* System mode leaves data-theme off, so honour the OS preference. Duplicated deliberately:
+   CSS cannot share a declaration block between a selector and a media query. */
+@media (prefers-color-scheme: dark) {
+    .layout:not([data-theme]) {
+        --scrollbar-color: #9F9F9F;
+        --foreground-subtext-rest: #8D8D8D;
+        --status-error: #E10B11;
+    }
+}
+
+.subtext {
+    color: var(--foreground-subtext-rest);
+}
+
+/* Aspire's own toolbar metrics. */
+fluent-toolbar fluent-divider {
+    border: 0;
+}
+
+@media (min-width: 768px) {
+    fluent-toolbar[orientation=horizontal].main-toolbar {
+        padding-left: var(--layout-left-padding);
+        padding-right: var(--layout-right-padding);
+    }
+}
+
+@media (max-width: 768px) {
+    fluent-toolbar[orientation=horizontal].main-toolbar {
+        padding-left: var(--space-2);
+        padding-right: var(--space-2);
+    }
+}
+
+/* The page fills the layout's body row; FluentSplitter renders a <split-panels> custom element,
+   so target that rather than a .fluent-splitter class (which does not exist). */
+.explorer,
+.explorer > split-panels {
     height: 100%;
 }
 
@@ -154,13 +230,27 @@ code {
     overflow: auto;
 }
 
+/* Sits outside .layout, so it only ever sees :root - keep it self-contained rather than
+   depending on theme-branched tokens it cannot reach. */
 #blazor-error-ui {
     display: none;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
+    z-index: 1000;
     background: #b32121;
     color: #fff;
-    padding: 0.6rem 1rem;
+    padding: var(--space-2) var(--space-4);
+    box-shadow: 0 -2px 8px rgb(0 0 0 / 25%);
+}
+
+#blazor-error-ui .reload,
+#blazor-error-ui .dismiss {
+    color: #fff;
+}
+
+#blazor-error-ui .dismiss {
+    float: right;
+    cursor: pointer;
 }

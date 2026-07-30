@@ -22,6 +22,10 @@ var app = builder.Build();
     serviceBuilder.AddServiceEndpoint<EchoService, IEchoService>(
         new BasicHttpBinding(BasicHttpSecurityMode.None), "/echo");
 
+    serviceBuilder.AddService<InventoryService>();
+    serviceBuilder.AddServiceEndpoint<InventoryService, IInventoryService>(
+        new BasicHttpBinding(BasicHttpSecurityMode.None), "/inventory");
+
     var metadata = app.Services.GetRequiredService<ServiceMetadataBehavior>();
     metadata.HttpGetEnabled = true;
 });

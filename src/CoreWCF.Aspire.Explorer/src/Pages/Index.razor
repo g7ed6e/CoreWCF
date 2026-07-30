@@ -21,7 +21,12 @@
                     <FluentTreeView>
                         @foreach (var service in Catalog.Services)
                         {
-                            <FluentTreeItem @onclick="() => ToggleServiceAsync(service)" InitiallyExpanded="false">
+                            @* Bind Expanded rather than relying on @onclick: clicking the label used to
+                               load the WSDL without ever opening the node, so the operations stayed
+                               hidden. Binding also makes keyboard expansion (Right arrow) load it. *@
+                            <FluentTreeItem Expanded="@_expanded.Contains(service.Name)"
+                                            ExpandedChanged="@(expanded => OnServiceExpandedAsync(service, expanded))"
+                                            @onclick="() => OnServiceExpandedAsync(service, true)">
                                 <span class="svc">@service.Name</span>
 
                                 @if (_loading.Contains(service.Name))
@@ -167,6 +172,7 @@
     private readonly Dictionary<string, WsdlModel?> _models = new();
     private readonly Dictionary<string, string?> _errors = new();
     private readonly HashSet<string> _loading = new();
+    private readonly HashSet<string> _expanded = new();
 
     private CoreWcfServiceDescriptor? _selectedService;
     private WsdlOperation? _selectedOperation;
@@ -180,7 +186,24 @@
     private ParsedSoapResponse? _parsed;
     private string? _invokeError;
 
-    private async Task ToggleServiceAsync(CoreWcfServiceDescriptor service)
+    private async Task OnServiceExpandedAsync(CoreWcfServiceDescriptor service, bool expanded)
+    {
+        if (expanded)
+        {
+            _expanded.Add(service.Name);
+        }
+        else
+        {
+            _expanded.Remove(service.Name);
+        }
+
+        if (expanded)
+        {
+            await LoadServiceAsync(service);
+        }
+    }
+
+    private async Task LoadServiceAsync(CoreWcfServiceDescriptor service)
     {
         if (_models.ContainsKey(service.Name) || _loading.Contains(service.Name))
         {

@@ -11,10 +11,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CoreWCF SOAP Explorer</title>
     <base href="~/" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="stylesheet" href="_content/Microsoft.FluentUI.AspNetCore.Components/css/reboot.css" />
     <link rel="stylesheet" href="app.css" />
+    <!-- Scoped-CSS bundle. This also pulls in Fluent UI's own component styles; without it every
+         Fluent component renders unstyled. -->
+    <link rel="stylesheet" href="CoreWCF.Aspire.Explorer.styles.css" />
+    <!-- Applies the stored theme before first paint. storage-name must match MainLayout's StorageName. -->
+    <script src="_content/Microsoft.FluentUI.AspNetCore.Components/js/loading-theme.js" type="text/javascript"></script>
 </head>
 <body>
+    <loading-theme storage-name="corewcf-explorer-theme"></loading-theme>
+
     <component type="typeof(CoreWCF.Aspire.Explorer.App)" render-mode="ServerPrerendered" />
 
     <div id="blazor-error-ui">
@@ -24,5 +32,6 @@
     </div>
 
     <script src="_framework/blazor.server.js"></script>
+    <script type="module" src="js/theme-fill.js"></script>
 </body>
 </html>

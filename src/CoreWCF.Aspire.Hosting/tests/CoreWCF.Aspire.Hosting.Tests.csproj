@@ -9,6 +9,9 @@
     <IsPackable>false</IsPackable>
     <!-- This is a self-contained Aspire model test; it does not use the shared CoreWCF test helpers. -->
     <ReferenceCommonTestProject>false</ReferenceCommonTestProject>
+    <!-- The net10.0/net11.0 legs resolve Aspire 13.x, which needs Microsoft.Extensions.* 10.0.x.
+         Transitive pinning would hold those at the repo-wide 8.0.x pins and fail with NU1605. -->
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
   <ItemGroup>

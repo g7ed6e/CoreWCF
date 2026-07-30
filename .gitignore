@@ -292,3 +292,6 @@ docker-compose.override.yml
 
 # Structured binlog files
 *.binlog
+
+# playwright-cli session scratch (page snapshots, console logs)
+.playwright-cli/
