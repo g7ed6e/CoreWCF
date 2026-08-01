@@ -87,10 +87,16 @@ pretty-printed envelope, with a copy button.
 
 ### Faults
 
-A SOAP fault is not just a red status. The fault string is lifted out of the envelope and shown in
-its own message bar, and the raw envelope stays available on the XML tab:
+A SOAP fault is not just a red status. The fault reason and code are lifted out of the envelope and
+shown in their own message bar, and the raw envelope stays available on the XML tab.
 
-![A SOAP fault, with the fault string surfaced above the raw envelope](images/response-fault.png)
+The two SOAP versions spell a fault entirely differently — `faultcode`/`faultstring` in 1.1,
+`Code`/`Reason` in 1.2 — so the explorer reads them with WCF's own `MessageFault` rather than
+guessing at element names. The code is reported as the version in play actually names it, so the
+same failure reads `SOAP fault (Client)` against a 1.1 endpoint and `SOAP fault (Sender)` against
+a 1.2 one:
+
+![A SOAP fault, with the reason and code surfaced above the raw envelope](images/response-fault.png)
 
 ### Themes
 
@@ -110,10 +116,38 @@ to 768px nothing is lost and the page never scrolls sideways.
 
 ---
 
+## How it works
+
+Two halves, each using the library that fits it.
+
+**Reading the service.** The explorer fetches the flattened WSDL from `?singleWsdl` and reads it with
+`System.Web.Services.Description`, the WSDL object model, to get the contracts, their operations,
+each operation's SOAP version and action, and the shape of its request. The parameter grid and the
+sample envelope are both generated from the schema that comes with it.
+
+> WCF's own metadata importer — `WsdlImporter` and `MetadataExchangeClient` — is not part of the
+> .NET client libraries; it stayed behind on .NET Framework, and `dotnet-svcutil` is a design-time
+> code generator rather than something callable at runtime. Reading WSDL in a running app therefore
+> goes through the WSDL object model.
+
+**Calling the service.** Invocation goes through the WCF client stack, over a
+`ChannelFactory<IRequestChannel>`. The channel shape rather than a typed `ChannelFactory<T>`, because
+there is no compile-time contract to bind to — the operations came from WSDL read moments earlier.
+That leaves WCF in charge of the envelope, the SOAP version and the action header, and means a fault
+arrives as a message to be rendered rather than an exception to be caught.
+
+The request is built from the envelope exactly as it stands in the editor, so anything you add by
+hand — including headers — is sent as written.
+
+**WS-Addressing is off.** Endpoints that require addressing headers are not supported: turning it on
+would break plain `BasicHttpBinding` services, which are what this tool is usually pointed at.
+
 ## Notes and limits
 
-- **Transport.** The explorer speaks SOAP 1.1 and 1.2 over HTTP. Services must expose metadata
-  (`?singleWsdl`) for the explorer to read them — `ServiceMetadataBehavior.HttpGetEnabled`.
+- **Transport.** The explorer speaks SOAP 1.1 and 1.2 over HTTP and HTTPS. Services must expose
+  metadata (`?singleWsdl`) for the explorer to read them — `ServiceMetadataBehavior.HttpGetEnabled`.
+- **No WS-Addressing.** See *How it works* above. Endpoints that require addressing headers, such as
+  the default `WSHttpBinding`, will reject the request.
 - **No authentication.** Requests are sent as-is, with no credentials attached. It is a development
   tool; do not expose it to an untrusted network.
 - **Below 768px is unsupported.** The two-pane layout has no phone form factor.
