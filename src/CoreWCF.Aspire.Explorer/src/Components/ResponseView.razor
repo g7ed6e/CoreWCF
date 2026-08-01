@@ -34,9 +34,12 @@
 
         @if (Parsed is { IsFault: true })
         {
+            @* The code comes from MessageFault, so it reads correctly for both SOAP versions:
+               "Client" on 1.1, "Sender" on 1.2. *@
             <FluentMessageBar Intent="MessageIntent.Warning" Type="MessageType.MessageBar"
-                              AllowDismiss="false" Title="SOAP fault">
-                @(Parsed.FaultText ?? "The service returned a fault with no detail.")
+                              AllowDismiss="false"
+                              Title="@(Parsed.FaultCode is { Length: > 0 } code ? $"SOAP fault ({code})" : "SOAP fault")">
+                @(Parsed.FaultText ?? "The service returned a fault with no reason.")
             </FluentMessageBar>
         }
 
