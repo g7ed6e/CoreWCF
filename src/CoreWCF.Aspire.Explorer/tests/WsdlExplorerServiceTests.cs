@@ -68,8 +68,7 @@ public class WsdlExplorerServiceTests : IClassFixture<EchoServiceFixture>
         echo.RequestParameters.Single().Value = "Bonjour";
         var envelope = SoapRequestBuilder.BuildEnvelope(echo);
 
-        using var invokeHttp = new HttpClient();
-        var invoker = new SoapInvoker(invokeHttp);
+        var invoker = new SoapInvoker();
         var result = await invoker.InvokeAsync(Descriptor.EndpointAddress, echo, envelope);
 
         Assert.True(result.IsSuccess, $"Expected success but got {result.StatusCode}: {result.Body}");
@@ -88,12 +87,49 @@ public class WsdlExplorerServiceTests : IClassFixture<EchoServiceFixture>
         var model = await explorer.LoadAsync(Descriptor);
         var echo = model.Contracts.SelectMany(c => c.Operations).Single(o => o.Name == "Echo");
 
-        using var invokeHttp = new HttpClient();
-        var invoker = new SoapInvoker(invokeHttp);
+        var invoker = new SoapInvoker();
 
         var result = await invoker.InvokeAsync(Descriptor.EndpointAddress, echo, echo.SampleRequestEnvelope);
 
         Assert.True(result.IsSuccess, $"Expected success but got {result.StatusCode}: {result.Body}");
         Assert.Contains("You said:", result.Body);
+    }
+
+    [Fact]
+    public async Task Invoke_ReportsTheHttpStatusFromTheChannel()
+    {
+        using var http = new HttpClient();
+        var explorer = new WsdlExplorerService(http, NullLogger<WsdlExplorerService>.Instance);
+        var model = await explorer.LoadAsync(Descriptor);
+        var echo = model.Contracts.SelectMany(c => c.Operations).Single(o => o.Name == "Echo");
+
+        var result = await new SoapInvoker().InvokeAsync(
+            Descriptor.EndpointAddress, echo, echo.SampleRequestEnvelope);
+
+        // Going through IRequestChannel does not hide the transport: WCF hands the response's status
+        // line up as a message property, which is what the UI's status line reports.
+        Assert.Equal(200, result.StatusCode);
+        Assert.Equal("OK", result.ReasonPhrase);
+        Assert.True(result.Elapsed > TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task Invoke_SurfacesAFaultAsAResultRatherThanThrowing()
+    {
+        using var http = new HttpClient();
+        var explorer = new WsdlExplorerService(http, NullLogger<WsdlExplorerService>.Instance);
+        var model = await explorer.LoadAsync(Descriptor);
+        var echo = model.Contracts.SelectMany(c => c.Operations).Single(o => o.Name == "Echo");
+
+        // A body the contract cannot bind: the service answers with a SOAP fault. An explorer has to
+        // render that, so the channel must not turn it into an exception.
+        var envelope = echo.SampleRequestEnvelope.Replace("<Echo ", "<NotAnOperation ")
+            .Replace("</Echo>", "</NotAnOperation>");
+
+        var result = await new SoapInvoker().InvokeAsync(Descriptor.EndpointAddress, echo, envelope);
+
+        Assert.False(result.IsSuccess);
+        Assert.True(result.StatusCode >= 400, $"Expected a failure status, got {result.StatusCode}.");
+        Assert.Contains("Fault", result.Body);
     }
 }

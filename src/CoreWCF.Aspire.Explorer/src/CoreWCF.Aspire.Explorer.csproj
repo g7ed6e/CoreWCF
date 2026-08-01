@@ -22,6 +22,9 @@
   <ItemGroup>
     <PackageReference Include="System.Web.Services.Description" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
+    <!-- The WCF client stack, used to invoke operations through IRequestChannel rather than a
+         hand-rolled HTTP POST. Http brings Primitives with it. -->
+    <PackageReference Include="System.ServiceModel.Http" />
   </ItemGroup>
 
 </Project>

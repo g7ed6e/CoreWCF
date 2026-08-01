@@ -19,7 +19,8 @@ builder.Services.AddFluentUIComponents();
 
 builder.Services.AddSingleton<ServiceCatalog>();
 builder.Services.AddHttpClient<WsdlExplorerService>();
-builder.Services.AddHttpClient<SoapInvoker>();
+// No HttpClient: the invoker builds its own WCF channel per call.
+builder.Services.AddSingleton<SoapInvoker>();
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
