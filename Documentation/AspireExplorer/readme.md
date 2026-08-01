@@ -91,6 +91,19 @@ Results are shown two ways. **Formatted** flattens the response body into Name /
 complex values keep their XML and wrap rather than being clipped. **XML** shows the whole
 pretty-printed envelope, with a copy button.
 
+### SOAP versions
+
+Both SOAP 1.1 and 1.2 are supported, and the version is read from the WSDL binding rather than
+assumed — it is shown in the metadata row alongside the endpoint and the action. Everything
+downstream follows from it: the envelope namespace, how the action reaches the service, and how a
+fault is read back.
+
+The sample hosts the same contract twice so the difference is visible side by side. Here the SOAP
+1.2 endpoint is selected, and the reply comes back in a `http://www.w3.org/2003/05/soap-envelope`
+envelope:
+
+![The SOAP 1.2 endpoint selected, showing SOAP 1.2 in the metadata and a 1.2 response envelope](images/soap12.png)
+
 ### Faults
 
 A SOAP fault is not just a red status. The fault reason and code are lifted out of the envelope and
