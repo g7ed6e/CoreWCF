@@ -21,6 +21,7 @@ var echoService = builder.AddProject<Projects.CoreWcfSampleService>("echo-servic
 
 builder.AddCoreWcfExplorer("wcf-explorer")
     .WithCoreWcfService(echoService, metadataPath: "/echo", name: "Echo service")
+    .WithCoreWcfService(echoService, metadataPath: "/echo12", name: "Echo service (SOAP 1.2)")
     .WithCoreWcfService(echoService, metadataPath: "/inventory", name: "Inventory service");
 ```
 
@@ -28,6 +29,11 @@ Run the AppHost, open the Aspire dashboard, and follow the `wcf-explorer` endpoi
 `WithCoreWcfService` call becomes one service in the tree. See
 [`src/CoreWCF.Aspire.Hosting/README.md`](../../src/CoreWCF.Aspire.Hosting/README.md) for the full
 hosting API and the supported Aspire versions.
+
+Each path must be a metadata address of its own. Metadata is published **per service**, not per
+endpoint: two endpoints on one service class share a single WSDL document that is only reachable at
+the first endpoint's address, so the second one is invisible to any client. The sample hosts its
+SOAP 1.2 endpoint on a separate service type for exactly this reason.
 
 ---
 
@@ -94,9 +100,9 @@ The two SOAP versions spell a fault entirely differently — `faultcode`/`faults
 `Code`/`Reason` in 1.2 — so the explorer reads them with WCF's own `MessageFault` rather than
 guessing at element names. The code is reported as the version in play actually names it, so the
 same failure reads `SOAP fault (Client)` against a 1.1 endpoint and `SOAP fault (Sender)` against
-a 1.2 one:
+a 1.2 one. The sample exposes the same contract over both, so this is easy to see side by side:
 
-![A SOAP fault, with the reason and code surfaced above the raw envelope](images/response-fault.png)
+![A fault from the SOAP 1.2 endpoint, reported as "SOAP fault (Sender)" above the raw 1.2 envelope](images/response-fault.png)
 
 ### Themes
 

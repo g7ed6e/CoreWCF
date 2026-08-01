@@ -3,6 +3,7 @@
 
 using System.Linq;
 using System.Runtime.Serialization;
+using System.Text;
 using System.Threading.Tasks;
 using CoreWCF;
 using CoreWCF.Channels;
@@ -54,7 +55,7 @@ public interface IInventoryService
     int GetQuantity(string sku);
 }
 
-public sealed class CalculatorService : ICalculatorService
+public class CalculatorService : ICalculatorService
 {
     public int Add(int x, int y) => x + y;
 
@@ -63,6 +64,15 @@ public sealed class CalculatorService : ICalculatorService
     public string Fail(string reason) => throw new FaultException($"Failed on purpose: {reason}");
 
     public string PlaceOrder(OrderRequest request) => $"Ordered {request.Quantity} x {request.Sku}";
+}
+
+/// <summary>
+/// The same contract hosted again over SOAP 1.2. A distinct service type, because metadata is
+/// published per service: a second endpoint on <see cref="CalculatorService"/> would share one WSDL
+/// document reachable only at the first endpoint's address, so the explorer could never discover it.
+/// </summary>
+public sealed class Soap12CalculatorService : CalculatorService
+{
 }
 
 public sealed class InventoryService : IInventoryService
@@ -100,6 +110,17 @@ public sealed class SoapServiceFixture : IAsyncDisposable
             serviceBuilder.AddService<CalculatorService>();
             serviceBuilder.AddServiceEndpoint<CalculatorService, ICalculatorService>(
                 new BasicHttpBinding(BasicHttpSecurityMode.None), "/calc");
+
+            // BasicHttpBinding is SOAP 1.1 only, and WSHttpBinding would require WS-Addressing,
+            // which the explorer deliberately does not send. Compose 1.2 without addressing.
+            serviceBuilder.AddService<Soap12CalculatorService>();
+            serviceBuilder.AddServiceEndpoint<Soap12CalculatorService, ICalculatorService>(
+                new CustomBinding(
+                    new TextMessageEncodingBindingElement(
+                        MessageVersion.CreateVersion(EnvelopeVersion.Soap12, AddressingVersion.None),
+                        Encoding.UTF8),
+                    new HttpTransportBindingElement()),
+                "/calc12");
 
             serviceBuilder.AddService<InventoryService>();
             serviceBuilder.AddServiceEndpoint<InventoryService, IInventoryService>(

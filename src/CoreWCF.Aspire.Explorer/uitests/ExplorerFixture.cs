@@ -22,6 +22,9 @@ namespace CoreWCF.Aspire.Explorer.UITests;
 /// </summary>
 public sealed class ExplorerFixture : IAsyncLifetime
 {
+    /// <summary>Name of the SOAP 1.2 service in the tree, shared with the tests that select from it.</summary>
+    public const string Soap12ServiceName = "Calculator service (SOAP 1.2)";
+
     private readonly SoapServiceFixture _soapService = new();
 
     private Process? _explorer;
@@ -129,7 +132,8 @@ public sealed class ExplorerFixture : IAsyncLifetime
         // serves its stylesheets in any environment; leaving this at the default means these tests
         // would notice if that ever regressed and the UI came up unstyled.
         AddService(startInfo, 0, "Calculator service", soapBaseAddress, "/calc");
-        AddService(startInfo, 1, "Inventory service", soapBaseAddress, "/inventory");
+        AddService(startInfo, 1, Soap12ServiceName, soapBaseAddress, "/calc12");
+        AddService(startInfo, 2, "Inventory service", soapBaseAddress, "/inventory");
 
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the explorer process.");

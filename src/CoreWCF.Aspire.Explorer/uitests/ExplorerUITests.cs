@@ -24,13 +24,21 @@ public sealed class ExplorerUITests(ExplorerFixture fixture)
             "[data-operation-id] .row-text",
             "els => els.map(e => Math.round(e.getBoundingClientRect().left))");
 
+    private const string Soap11Service = "Calculator service";
+
     /// <summary>
     /// Clicks an operation and waits for the detail pane to catch up. Selection round-trips over the
     /// Blazor circuit, so asserting on the pane before the title has changed races the render.
+    /// <para>
+    /// Targeted by the tree's own identity rather than by accessible name: the same contract is
+    /// hosted over both SOAP versions, so an operation name alone matches two rows.
+    /// </para>
     /// </summary>
-    private static async Task SelectOperationAsync(IPage page, string operationName)
+    private static async Task SelectOperationAsync(
+        IPage page, string operationName, string serviceName = Soap11Service)
     {
-        await page.GetByRole(AriaRole.Treeitem, new() { Name = $"Operation {operationName}" }).ClickAsync();
+        var id = $"{serviceName}|ICalculatorService|{operationName}";
+        await page.Locator($"[data-operation-id='{id}']").ClickAsync();
         await Assertions.Expect(page.Locator(".detail-title")).ToHaveTextAsync(operationName);
     }
 
@@ -56,15 +64,16 @@ public sealed class ExplorerUITests(ExplorerFixture fixture)
 
         // Services load up front. A lazily loaded node has no children, so fluent-tree-item draws no
         // chevron and there would be nothing to click to trigger the load.
-        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(6);
+        // Four calculator operations over each SOAP version, plus two inventory ones.
+        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(10);
 
         foreach (var operation in new[] { "Add", "Describe", "Fail", "PlaceOrder", "IsInStock", "GetQuantity" })
         {
-            await Assertions.Expect(page.GetByRole(AriaRole.Treeitem, new() { Name = $"Operation {operation}" }))
+            await Assertions.Expect(page.GetByRole(AriaRole.Treeitem, new() { Name = $"Operation {operation}" }).First)
                 .ToBeVisibleAsync();
         }
 
-        await Assertions.Expect(page.Locator(".toolbar-count")).ToHaveTextAsync("6 operations in 2 services");
+        await Assertions.Expect(page.Locator(".toolbar-count")).ToHaveTextAsync("10 operations in 3 services");
     }
 
     [Fact]
@@ -175,7 +184,7 @@ public sealed class ExplorerUITests(ExplorerFixture fixture)
         await Assertions.Expect(page.Locator(".toolbar-count")).ToHaveTextAsync("1 operation in 1 service");
 
         await page.GetByRole(AriaRole.Searchbox).FillAsync("");
-        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(6);
+        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(10);
     }
 
     [Fact]
@@ -199,6 +208,45 @@ public sealed class ExplorerUITests(ExplorerFixture fixture)
     }
 
     [Fact]
+    public async Task Operations_can_be_invoked_over_soap_12()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await SelectOperationAsync(page, "Add", ExplorerFixture.Soap12ServiceName);
+
+        // The version is read from the WSDL binding, not assumed.
+        await Assertions.Expect(page.Locator(".meta")).ToContainTextAsync("1.2");
+        await Assertions.Expect(page.Locator(".meta")).ToContainTextAsync("/calc12");
+
+        await SetParameterAsync(page, "x", "17");
+        await SetParameterAsync(page, "y", "25");
+        await page.Keyboard.PressAsync("Control+Enter");
+
+        await Assertions.Expect(page.Locator(".response-status")).ToContainTextAsync("200 OK");
+        await Assertions.Expect(page.Locator(".resp-grid").First).ToContainTextAsync("42");
+
+        // The reply really is a 1.2 envelope, not a 1.1 one that happened to work.
+        await page.GetByRole(AriaRole.Tab, new() { Name = "XML" }).Last.ClickAsync();
+        await Assertions.Expect(page.Locator(".response-xml"))
+            .ToContainTextAsync("http://www.w3.org/2003/05/soap-envelope");
+    }
+
+    [Fact]
+    public async Task Soap_12_faults_report_the_code_as_1_2_spells_it()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await SelectOperationAsync(page, "Fail", ExplorerFixture.Soap12ServiceName);
+        await SetParameterAsync(page, "reason", "disk full");
+        await page.Keyboard.PressAsync("Control+Enter");
+
+        // Same failure, different spelling: 1.1 says Client, 1.2 says Sender. Reading the fault with
+        // MessageFault rather than by hunting for element names is what makes this come out right.
+        await Assertions.Expect(page.Locator(".response-view")).ToContainTextAsync("SOAP fault (Sender)");
+        await Assertions.Expect(page.Locator(".response-view")).ToContainTextAsync("disk full");
+    }
+
+    [Fact]
     public async Task Soap_faults_are_surfaced_rather_than_shown_as_a_bare_500()
     {
         var page = await _fixture.NewPageAsync();
@@ -213,5 +261,8 @@ public sealed class ExplorerUITests(ExplorerFixture fixture)
         // actually said instead of just timing out.
         var response = await page.Locator(".response-view").TextContentAsync() ?? string.Empty;
         Assert.Contains("disk full", response);
+
+        // 1.1 spells the code Client; the 1.2 endpoint is covered separately.
+        Assert.Contains("SOAP fault (Client)", response);
     }
 }
