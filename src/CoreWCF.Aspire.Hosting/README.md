@@ -9,6 +9,9 @@ service, fetches its WSDL (`?singleWsdl`), lists its contracts and operations, a
 pre-filled SOAP envelope and invoke the operation — a lightweight WCF Test Client / SoapUI, embedded in
 your Aspire run.
 
+📖 **[Explorer UI guide, with screenshots](../../Documentation/AspireExplorer/readme.md)** — the tree,
+filtering, the request editors, invoking, faults, themes and keyboard shortcuts.
+
 ## Usage
 
 In your Aspire AppHost:

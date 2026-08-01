@@ -96,6 +96,9 @@
     <PackageVersion Include="coverlet.collector" Version="8.0.1" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Xunit.StaFact" Version="3.0.13" />
+    <!-- Browser automation for the explorer UI tests. Those tests are deliberately outside the
+         CoreWCF.*.Tests.csproj glob the CI test action sweeps, because they need a browser. -->
+    <PackageVersion Include="Microsoft.Playwright" Version="1.61.0" />
     <PackageVersion Include="Testcontainers" Version="4.11.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.11.0" />
     <PackageVersion Include="System.Reflection.Metadata" Version="8.0.1" />

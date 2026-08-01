@@ -1,0 +1,187 @@
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Playwright;
+using Xunit;
+
+namespace CoreWCF.Aspire.Explorer.UITests;
+
+/// <summary>
+/// Feature-level tests for the explorer UI, driven through a real browser against the real app.
+/// Several of these pin behaviour that regressed during development and would be invisible to a
+/// unit test - row geometry, keyboard operation, and when a bound value actually reaches the server.
+/// </summary>
+[Collection(nameof(ExplorerCollection))]
+public sealed class ExplorerUITests(ExplorerFixture fixture)
+{
+    private readonly ExplorerFixture _fixture = fixture;
+
+    /// <summary>Left edge of every operation label, used to detect horizontal drift in the tree.</summary>
+    private static Task<double[]> OperationLabelOffsetsAsync(IPage page)
+        => page.EvalOnSelectorAllAsync<double[]>(
+            "[data-operation-id] .row-text",
+            "els => els.map(e => Math.round(e.getBoundingClientRect().left))");
+
+    /// <summary>
+    /// Clicks an operation and waits for the detail pane to catch up. Selection round-trips over the
+    /// Blazor circuit, so asserting on the pane before the title has changed races the render.
+    /// </summary>
+    private static async Task SelectOperationAsync(IPage page, string operationName)
+    {
+        await page.GetByRole(AriaRole.Treeitem, new() { Name = $"Operation {operationName}" }).ClickAsync();
+        await Assertions.Expect(page.Locator(".detail-title")).ToHaveTextAsync(operationName);
+    }
+
+    /// <summary>
+    /// Types a parameter value and lets it reach the server.
+    /// <para>
+    /// The parameter cells bind on input with an 80 ms debounce, and nothing in the UI echoes the
+    /// bound value back, so there is no state to poll - a settle is the only way to observe it. This
+    /// is not a workaround for the blur bug: focus deliberately stays in the cell, so a binding that
+    /// only committed on blur would still send the previous value however long the test waited.
+    /// </para>
+    /// </summary>
+    private static async Task SetParameterAsync(IPage page, string parameterName, string value)
+    {
+        await page.GetByLabel($"Value of {parameterName}").FillAsync(value);
+        await page.WaitForTimeoutAsync(300);
+    }
+
+    [Fact]
+    public async Task Tree_lists_every_service_and_operation_without_being_expanded()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        // Services load up front. A lazily loaded node has no children, so fluent-tree-item draws no
+        // chevron and there would be nothing to click to trigger the load.
+        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(6);
+
+        foreach (var operation in new[] { "Add", "Describe", "Fail", "PlaceOrder", "IsInStock", "GetQuantity" })
+        {
+            await Assertions.Expect(page.GetByRole(AriaRole.Treeitem, new() { Name = $"Operation {operation}" }))
+                .ToBeVisibleAsync();
+        }
+
+        await Assertions.Expect(page.Locator(".toolbar-count")).ToHaveTextAsync("6 operations in 2 services");
+    }
+
+    [Fact]
+    public async Task Selecting_an_operation_shows_its_endpoint_and_parameters()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await SelectOperationAsync(page, "Add");
+
+        await Assertions.Expect(page.Locator(".detail-contract")).ToContainTextAsync("ICalculatorService");
+        await Assertions.Expect(page.Locator(".meta-code").First).ToContainTextAsync("/calc");
+        await Assertions.Expect(page.GetByLabel("Value of x")).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByLabel("Value of y")).ToBeVisibleAsync();
+    }
+
+    [Fact]
+    public async Task Selecting_an_operation_does_not_shift_the_row_sideways()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        var before = await OperationLabelOffsetsAsync(page);
+        await SelectOperationAsync(page, "Add");
+        var after = await OperationLabelOffsetsAsync(page);
+
+        // Regression guard. Selection has to travel on an attribute Blazor owns outright, never on
+        // Class: a Class that changes between renders makes Blazor rewrite the whole class attribute,
+        // which destroys the "nested" class fluent-tree-item adds itself to indent child rows. The
+        // selected row then jumps 16px to the left.
+        Assert.Equal(before, after);
+    }
+
+    [Fact]
+    public async Task Operations_can_be_selected_from_the_keyboard()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        // Start from a known row rather than counting Tab stops into the tree - the toolbar's stops
+        // vary with whether the filter box is showing its clear button.
+        await SelectOperationAsync(page, "Add");
+
+        // From here on it is keyboard only: walk down the tree and open what is focused.
+        await page.Keyboard.PressAsync("ArrowDown");
+        await page.Keyboard.PressAsync("Enter");
+
+        await Assertions.Expect(page.Locator(".detail-title")).ToHaveTextAsync("Describe");
+    }
+
+    [Fact]
+    public async Task Ctrl_Enter_invokes_with_the_value_still_being_typed()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await SelectOperationAsync(page, "Add");
+        await SetParameterAsync(page, "x", "17");
+        await SetParameterAsync(page, "y", "25");
+
+        // No blur between typing and invoking - the shortcut fires while the cell still has focus.
+        // With change-only binding the second value never reaches the server and this returns 17.
+        await page.Keyboard.PressAsync("Control+Enter");
+
+        await Assertions.Expect(page.Locator(".response-status")).ToContainTextAsync("200 OK");
+
+        // .First: the class lands on the grid and on elements it renders inside itself.
+        await Assertions.Expect(page.Locator(".resp-grid").First).ToContainTextAsync("AddResult");
+        await Assertions.Expect(page.Locator(".resp-grid").First).ToContainTextAsync("42");
+    }
+
+    [Fact]
+    public async Task Filter_narrows_the_tree_and_the_count()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await page.GetByRole(AriaRole.Searchbox).FillAsync("stock");
+
+        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(1);
+        await Assertions.Expect(page.GetByRole(AriaRole.Treeitem, new() { Name = "Operation IsInStock" }))
+            .ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".toolbar-count")).ToHaveTextAsync("1 operation in 1 service");
+
+        await page.GetByRole(AriaRole.Searchbox).FillAsync("");
+        await Assertions.Expect(page.Locator("[data-operation-id]")).ToHaveCountAsync(6);
+    }
+
+    [Fact]
+    public async Task Complex_parameters_fall_back_to_the_xml_editor()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await SelectOperationAsync(page, "PlaceOrder");
+
+        // A data contract cannot be expressed by the Name/Type/Value grid, so the formatted tab
+        // disables itself and the pre-filled envelope is the way in.
+        await Assertions.Expect(page.GetByRole(AriaRole.Tab, new() { Name = "Formatted" }).First)
+            .ToBeDisabledAsync();
+
+        // Read the property off the custom element itself: fluent-text-area is not an <input> or a
+        // <textarea>, so InputValueAsync rejects it, and the envelope is a value rather than text.
+        var envelope = await page.Locator(".xml-editor").First.EvaluateAsync<string>("el => el.value");
+        Assert.Contains("PlaceOrder", envelope);
+        Assert.Contains("Quantity", envelope);
+        Assert.Contains("Sku", envelope);
+    }
+
+    [Fact]
+    public async Task Soap_faults_are_surfaced_rather_than_shown_as_a_bare_500()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        await SelectOperationAsync(page, "Fail");
+        await SetParameterAsync(page, "reason", "disk full");
+        await page.Keyboard.PressAsync("Control+Enter");
+
+        await Assertions.Expect(page.Locator(".response-status")).ToContainTextAsync("500");
+
+        // Assert on the captured text rather than with Expect, so a mismatch reports what the pane
+        // actually said instead of just timing out.
+        var response = await page.Locator(".response-view").TextContentAsync() ?? string.Empty;
+        Assert.Contains("disk full", response);
+    }
+}
