@@ -117,9 +117,9 @@ to 768px nothing is lost and the page never scrolls sideways.
 - **No authentication.** Requests are sent as-is, with no credentials attached. It is a development
   tool; do not expose it to an untrusted network.
 - **Below 768px is unsupported.** The two-pane layout has no phone form factor.
-- **Static assets.** The explorer serves its stylesheets through ASP.NET Core's static web assets,
-  which are only mapped outside of production. When running it directly rather than through the
-  published container image, set `ASPNETCORE_ENVIRONMENT=Development`.
+- **No environment requirement.** The explorer serves its stylesheets in any environment, whether it
+  is run from source or from the published container image. `ASPNETCORE_ENVIRONMENT` does not have
+  to be set to `Development`.
 
 ## Related
 

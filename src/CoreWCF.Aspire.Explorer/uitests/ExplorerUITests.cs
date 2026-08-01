@@ -68,6 +68,36 @@ public sealed class ExplorerUITests(ExplorerFixture fixture)
     }
 
     [Fact]
+    public async Task Stylesheets_are_served_whatever_the_environment()
+    {
+        var page = await _fixture.NewPageAsync();
+
+        // The fixture runs the explorer in the default environment, not Development. Razor class
+        // library content and the scoped-CSS bundle are static web assets, which WebApplicationBuilder
+        // only wires up in Development - so without the app's own UseStaticWebAssets call these 404
+        // and every Fluent component renders unstyled.
+        var bundleLoaded = await page.EvaluateAsync<bool>(
+            """
+            () => Array.from(document.styleSheets).some(s =>
+                (s.href || '').includes('CoreWCF.Aspire.Explorer.styles.css') && s.cssRules.length > 0)
+            """);
+        Assert.True(bundleLoaded, "The scoped-CSS bundle did not load.");
+
+        var rebootLoaded = await page.EvaluateAsync<bool>(
+            """
+            () => Array.from(document.styleSheets).some(s =>
+                (s.href || '').includes('Microsoft.FluentUI.AspNetCore.Components') && s.cssRules.length > 0)
+            """);
+        Assert.True(rebootLoaded, "The Fluent UI stylesheet did not load.");
+
+        // Belt and braces: an unstyled header would be transparent rather than painted with the
+        // chrome surface colour.
+        var headerBackground = await page.Locator(".app-header")
+            .EvaluateAsync<string>("el => getComputedStyle(el).backgroundColor");
+        Assert.NotEqual("rgba(0, 0, 0, 0)", headerBackground);
+    }
+
+    [Fact]
     public async Task Selecting_an_operation_shows_its_endpoint_and_parameters()
     {
         var page = await _fixture.NewPageAsync();

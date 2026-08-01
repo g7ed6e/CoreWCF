@@ -6,6 +6,13 @@ using Microsoft.FluentUI.AspNetCore.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// WebApplicationBuilder only wires up static web assets when the environment is Development, so a
+// non-published run in any other environment serves no Razor class library content: every
+// _content/... asset and the scoped-CSS bundle 404, and the whole UI renders unstyled. Doing it
+// explicitly removes that trap. It is a no-op once published, because publishing copies the assets
+// into wwwroot and leaves no manifest behind for this to read.
+builder.WebHost.UseStaticWebAssets();
+
 builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
 builder.Services.AddFluentUIComponents();

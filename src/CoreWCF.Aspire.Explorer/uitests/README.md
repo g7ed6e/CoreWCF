@@ -28,6 +28,7 @@ it in every CI leg, and renaming it away from `Tests` would strip its test infra
 
 | Test | Feature |
 | --- | --- |
+| `Stylesheets_are_served_whatever_the_environment` | Static web assets load outside Development |
 | `Tree_lists_every_service_and_operation_without_being_expanded` | Services are read at start-up, so the tree arrives populated |
 | `Selecting_an_operation_shows_its_endpoint_and_parameters` | Detail pane: metadata row and the parameter grid |
 | `Selecting_an_operation_does_not_shift_the_row_sideways` | Tree geometry is stable across selection |
@@ -52,6 +53,7 @@ row geometry, keyboard operation, and the moment a bound value actually reaches 
   `SetParameterAsync` settles briefly after typing. That is about the debounce, not about focus:
   focus stays in the cell, so a binding that only committed on blur would still fail the test.
 - Each test gets a fresh page. A shared page would leak the selection and the filter between tests.
-- The explorer child process runs with `ASPNETCORE_ENVIRONMENT=Development`, because
-  `WebApplicationBuilder` only maps static web assets outside production — without it the Fluent UI
-  stylesheets 404 and every component renders unstyled.
+- The explorer child process deliberately runs in the **default** environment, not Development, and
+  with `--no-launch-profile`. `Stylesheets_are_served_whatever_the_environment` depends on that:
+  `WebApplicationBuilder` only wires up static web assets in Development, so the app calls
+  `UseStaticWebAssets()` itself. Forcing Development here would hide a regression in that call.

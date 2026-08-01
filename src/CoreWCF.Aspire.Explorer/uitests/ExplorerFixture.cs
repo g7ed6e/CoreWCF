@@ -113,7 +113,10 @@ public sealed class ExplorerFixture : IAsyncLifetime
             // --no-build: the ProjectReference has already produced the output this runs.
             ArgumentList =
             {
-                "run", "--project", projectPath, "--no-build",
+                // --no-launch-profile: launchSettings.json would otherwise force Development and its
+                // own fixed ports. Running in the default environment also keeps these tests honest
+                // about the explorer serving its assets outside Development.
+                "run", "--project", projectPath, "--no-build", "--no-launch-profile",
                 "-c", configuration,
                 "--urls", $"http://127.0.0.1:{port}",
             },
@@ -122,12 +125,9 @@ public sealed class ExplorerFixture : IAsyncLifetime
             UseShellExecute = false,
         };
 
-        // Development is required, not cosmetic: WebApplicationBuilder only calls UseStaticWebAssets
-        // outside of production, and without it the Fluent UI assets and the scoped-CSS bundle 404 -
-        // which is exactly the failure this suite exists to catch.
-        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
-        startInfo.Environment["DOTNET_ENVIRONMENT"] = "Development";
-
+        // Deliberately not forced to Development. The explorer calls UseStaticWebAssets itself, so it
+        // serves its stylesheets in any environment; leaving this at the default means these tests
+        // would notice if that ever regressed and the UI came up unstyled.
         AddService(startInfo, 0, "Calculator service", soapBaseAddress, "/calc");
         AddService(startInfo, 1, "Inventory service", soapBaseAddress, "/inventory");
 
