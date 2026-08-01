@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="CoreWCF SOAP Explorer">
-  <rect width="32" height="32" rx="6" fill="#512BD4"/>
-  <path d="M11.4 10.6 6.8 16l4.6 5.4" fill="none" stroke="#fff" stroke-width="2.4"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M20.6 10.6 25.2 16l-4.6 5.4" fill="none" stroke="#fff" stroke-width="2.4"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M18.2 8.6 13.8 23.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
-</svg>
