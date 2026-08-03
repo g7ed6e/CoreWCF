@@ -1,0 +1,79 @@
+name: 'Publish the CoreWCF SOAP Explorer image'
+description: |
+  Builds the CoreWCF.Aspire.Explorer container image with SDK container publishing, tags it under the
+  registry the hosting package resolves at run time, and optionally pushes it.
+
+  Without `push`, the image is only loaded into the runner's Docker daemon. That is deliberate: a
+  pull_request run from a fork gets a read-only GITHUB_TOKEN and no secrets, so it cannot push
+  anywhere - but Aspire resolves a locally tagged image without contacting the registry, so the
+  integration tests exercise the real image all the same. Pushing happens from the trusted triggers
+  in ci.yml.
+
+  Requires a Linux container runtime; the image is a linux-x64 ASP.NET Core image.
+inputs:
+  image-tag:
+    description: 'Primary tag to build, e.g. pr-1757-a1b2c3d.'
+    required: true
+  additional-tags:
+    description: 'Optional extra tags for the same image, space separated (e.g. "main latest").'
+    required: false
+    default: ''
+  registry:
+    description: 'Registry the hosting package resolves the image from.'
+    required: false
+    default: 'ghcr.io'
+  repository:
+    description: 'Image repository. Must match ContainerRepository in the explorer csproj.'
+    required: false
+    default: 'corewcf/aspire-explorer'
+  push:
+    description: 'Push the tags to the registry. Requires a prior docker login.'
+    required: false
+    default: 'false'
+outputs:
+  image:
+    description: 'Fully qualified primary image reference, e.g. ghcr.io/corewcf/aspire-explorer:pr-1757-a1b2c3d.'
+    value: ${{ steps.build.outputs.image }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish explorer container image
+      id: build
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        ADDITIONAL_TAGS: ${{ inputs.additional-tags }}
+        REGISTRY: ${{ inputs.registry }}
+        REPOSITORY: ${{ inputs.repository }}
+      run: |
+        set -euo pipefail
+
+        # No ContainerRegistry property, so the SDK loads the image into the local Docker daemon
+        # under the csproj's ContainerRepository rather than pushing it anywhere.
+        dotnet publish src/CoreWCF.Aspire.Explorer/src/CoreWCF.Aspire.Explorer.csproj \
+          --configuration Release \
+          -t:PublishContainer \
+          -p:ContainerImageTag="$IMAGE_TAG"
+
+        # Retag under the registry CoreWcfExplorerImageTags hardcodes. Aspire looks the image up by
+        # that fully qualified name and uses the local one when it is present.
+        for tag in $IMAGE_TAG $ADDITIONAL_TAGS; do
+          docker tag "$REPOSITORY:$IMAGE_TAG" "$REGISTRY/$REPOSITORY:$tag"
+          echo "Tagged $REGISTRY/$REPOSITORY:$tag"
+        done
+
+        echo "image=$REGISTRY/$REPOSITORY:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+    - name: Push explorer container image
+      if: inputs.push == 'true'
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        ADDITIONAL_TAGS: ${{ inputs.additional-tags }}
+        REGISTRY: ${{ inputs.registry }}
+        REPOSITORY: ${{ inputs.repository }}
+      run: |
+        set -euo pipefail
+        for tag in $IMAGE_TAG $ADDITIONAL_TAGS; do
+          docker push "$REGISTRY/$REPOSITORY:$tag"
+        done

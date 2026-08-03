@@ -32,6 +32,20 @@ builder.Build().Run();
 `AddCoreWcfExplorer` runs the explorer from its published container image. Open the **SOAP Explorer**
 URL shown on the explorer resource in the dashboard.
 
+### The container image
+
+The explorer image is `ghcr.io/corewcf/aspire-explorer`, built from
+`src/CoreWCF.Aspire.Explorer` with SDK container publishing and pushed by the CI workflow:
+
+| Tag | Points at |
+| --- | --- |
+| `latest` | the most recent build of `main` — what `AddCoreWcfExplorer` resolves by default |
+| `main` | the same, as a named moving tag |
+| `sha-<short>` | one specific commit; immutable |
+
+Pass `imageTag:` to pin a different one. Every build of the image is exercised end to end before it is
+pushed — see `integrationtests/`, which starts a real AppHost against it.
+
 ### Requirements on the CoreWCF service
 
 The service must expose metadata over HTTP GET so the explorer can read the WSDL:
