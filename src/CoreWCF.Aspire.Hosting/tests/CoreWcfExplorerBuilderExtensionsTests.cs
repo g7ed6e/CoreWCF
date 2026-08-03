@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Aspire.Hosting;
@@ -45,29 +44,6 @@ public class CoreWcfExplorerBuilderExtensionsTests
         Assert.Equal("soap-ui", explorer.Resource.Name);
         var image = Assert.Single(explorer.Resource.Annotations.OfType<ContainerImageAnnotation>());
         Assert.Equal("1.2.3", image.Tag);
-    }
-
-    [Fact]
-    public async Task AddCoreWcfExplorer_MapsHostDockerInternalOntoTheContainerGateway()
-    {
-        var builder = DistributedApplication.CreateBuilder(Array.Empty<string>());
-
-        var explorer = builder.AddCoreWcfExplorer();
-
-        var args = new List<object>();
-        var context = new ContainerRuntimeArgsCallbackContext(args);
-        foreach (var annotation in explorer.Resource.Annotations.OfType<ContainerRuntimeArgsCallbackAnnotation>())
-        {
-            await annotation.Callback(context);
-        }
-
-        // Aspire hands container resources host.docker.internal to reach a host process. Docker Desktop
-        // resolves it unprompted; a plain Docker Engine on Linux does not, so without this mapping the
-        // explorer cannot read the WSDL of any service added with AddProject. The failure is invisible
-        // on a developer's Docker Desktop machine, which is why it is pinned here.
-        Assert.Equal(
-            new[] { "--add-host", "host.docker.internal:host-gateway" },
-            args.Select(a => a.ToString()).ToArray());
     }
 
     [Fact]

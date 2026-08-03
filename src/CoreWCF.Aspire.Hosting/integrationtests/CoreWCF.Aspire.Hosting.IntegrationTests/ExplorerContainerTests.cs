@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Net;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace CoreWcfExplorer.IntegrationTests;
@@ -40,6 +41,15 @@ public sealed class ExplorerContainerTests(ExplorerAppHostFixture fixture)
         // loads every service up front and prerendering awaits it.
         Assert.Contains("Echo service", html);
         Assert.Contains("Inventory service", html);
+
+        // Check the explorer's own error surface before asserting on contents. When a fetch fails the
+        // tree renders "Failed to load WSDL: <reason>" for that service, and the reason is the whole
+        // diagnosis - a name that will not resolve reads differently from a refused connection. Without
+        // this, the same failure only ever reports "substring not found" against a truncated page.
+        var failure = Regex.Match(html, "Failed to load WSDL:[^<]*");
+        Assert.False(
+            failure.Success,
+            $"The explorer could not read a service's metadata from inside its container: {failure.Value.Trim()}");
 
         // Contract and operation names only exist if the WSDL parsed, not merely downloaded.
         Assert.Contains("IEchoService", html);
