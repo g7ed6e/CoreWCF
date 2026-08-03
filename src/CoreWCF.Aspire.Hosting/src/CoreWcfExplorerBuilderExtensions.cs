@@ -42,6 +42,12 @@ public static class CoreWcfExplorerBuilderExtensions
             .WithImageRegistry(CoreWcfExplorerImageTags.Registry)
             .WithHttpEndpoint(port: port, targetPort: ExplorerContainerPort, name: CoreWcfExplorerResource.PrimaryEndpointName)
             .WithHttpHealthCheck("/health")
+            // Aspire addresses host processes from a container as host.docker.internal. Docker Desktop
+            // resolves that name on its own, but a plain Docker Engine on Linux does not unless the
+            // mapping is asked for - so without this the explorer cannot reach any service that runs as
+            // a project, which is the case this integration exists for. Supported by Docker 20.10+ and
+            // Podman 4+; harmless where the name already resolves.
+            .WithContainerRuntimeArgs("--add-host", "host.docker.internal:host-gateway")
             .WithUrlForEndpoint(CoreWcfExplorerResource.PrimaryEndpointName, url => url.DisplayText = "SOAP Explorer");
     }
 
