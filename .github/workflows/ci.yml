@@ -256,15 +256,27 @@ jobs:
           fi
 
       - name: Build explorer container image
-        uses: ./.github/actions/publish-explorer-image
+        uses: ./.github/actions/publish-container-image
         with:
+          project: src/CoreWCF.Aspire.Explorer/src/CoreWCF.Aspire.Explorer.csproj
+          repository: corewcf/aspire-explorer
+          registry: ghcr.io
           image-tag: ${{ steps.image.outputs.tag }}
           additional-tags: ${{ steps.image.outputs.extra }}
+
+      # Consumed only by the AppHost under test, never pushed, so it needs no registry prefix.
+      - name: Build sample service container image
+        uses: ./.github/actions/publish-container-image
+        with:
+          project: src/CoreWCF.Aspire.Hosting/samples/CoreWcfSampleService/CoreWcfSampleService.csproj
+          repository: corewcf/sample-service
+          image-tag: ${{ steps.image.outputs.tag }}
 
       - name: Run integration tests
         shell: bash
         env:
           CoreWcfExplorer__ImageTag: ${{ steps.image.outputs.tag }}
+          CoreWcfSampleService__ImageTag: ${{ steps.image.outputs.tag }}
           ASPIRE_ALLOW_UNSECURED_TRANSPORT: 'true'
         run: |
           dotnet test src/CoreWCF.Aspire.Hosting/integrationtests/CoreWCF.Aspire.Hosting.IntegrationTests/CoreWCF.Aspire.Hosting.IntegrationTests.csproj \
@@ -313,8 +325,11 @@ jobs:
       # Rebuilt rather than carried over from the previous job: a Docker image is not a workflow
       # artifact, and `docker save`/`load` of a ~340 MB tarball costs more than the rebuild.
       - name: Build and push explorer container image
-        uses: ./.github/actions/publish-explorer-image
+        uses: ./.github/actions/publish-container-image
         with:
+          project: src/CoreWCF.Aspire.Explorer/src/CoreWCF.Aspire.Explorer.csproj
+          repository: corewcf/aspire-explorer
+          registry: ghcr.io
           image-tag: ${{ needs.explorer-integration-tests.outputs.image-tag }}
           additional-tags: ${{ needs.explorer-integration-tests.outputs.extra-tags }}
           push: 'true'

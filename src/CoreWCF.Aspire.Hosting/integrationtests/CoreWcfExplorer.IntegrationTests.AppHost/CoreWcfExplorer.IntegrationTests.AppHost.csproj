@@ -39,9 +39,10 @@
   <ItemGroup>
     <!-- The integration under test: AddCoreWcfExplorer / WithCoreWcfService. -->
     <ProjectReference Include="../../src/CoreWCF.Aspire.Hosting.csproj" IsAspireProjectResource="false" />
-    <!-- The CoreWCF service the explorer reads metadata from. Reused from the sample rather than
-         duplicated: it already hosts two contracts over both SOAP versions with metadata enabled. -->
-    <ProjectReference Include="../../samples/CoreWcfSampleService/CoreWcfSampleService.csproj" />
+    <!--
+      No reference to CoreWcfSampleService: it is run as a container image, not as a project resource
+      (see Program.cs for why). The image is built separately - see integrationtests/README.md.
+    -->
   </ItemGroup>
 
 </Project>

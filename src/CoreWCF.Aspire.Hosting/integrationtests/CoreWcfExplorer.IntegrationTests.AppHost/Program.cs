@@ -3,25 +3,24 @@
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// The service whose metadata the explorer will read. Same one the sample uses.
-var echoService = builder.AddProject<Projects.CoreWcfSampleService>("echo-service");
+// Which images to run. CI publishes both under a per-run tag and passes them in; with nothing set
+// these fall back to the defaults, which is what a consumer of the published package gets.
+var explorerTag = builder.Configuration["CoreWcfExplorer:ImageTag"];
+var serviceTag = builder.Configuration["CoreWcfSampleService:ImageTag"] ?? "latest";
 
-// Which explorer image to run. CI publishes the image under a per-run tag and passes it in via
-// CoreWcfExplorer__ImageTag; with nothing set this falls back to the package default, which is what
-// a consumer of the published package gets.
-var imageTag = builder.Configuration["CoreWcfExplorer:ImageTag"];
+// The service whose metadata the explorer reads, run as a container rather than as a project.
+//
+// Not a stylistic choice. This AppHost is pinned to the Aspire 9.5.2 support floor, and on that line
+// a container cannot reach a proxied project endpoint on Linux: the address handed to the container
+// is host.docker.internal, which does not resolve there, and mapping it to the bridge gateway only
+// moves the failure on to "connection refused" because the proxy is not listening on that interface.
+// Aspire 13.3 solved this properly with the container tunnel. Below it, the only way to exercise the
+// explorer against a real service is to put both on the container network, where they address each
+// other by resource name and no host hop is involved.
+var echoService = builder.AddContainer("echo-service", "corewcf/sample-service", serviceTag)
+    .WithHttpEndpoint(targetPort: 8080, name: "http");
 
-builder.AddCoreWcfExplorer("wcf-explorer", imageTag: string.IsNullOrWhiteSpace(imageTag) ? null : imageTag)
-    // Aspire 9.x addresses a host process from a container as host.docker.internal, and before the
-    // container tunnel arrived in Aspire 13.3 nothing made that name resolve on Linux. Docker Desktop
-    // supplies it, so this is invisible on a developer machine; on a Linux CI runner the explorer fails
-    // with "Failed to load WSDL: Name or service not known (host.docker.internal:<port>)".
-    //
-    // Deliberately here and not in AddCoreWcfExplorer: a consumer on a current Aspire gets the tunnel
-    // and needs none of this, and a hosting integration is the wrong place for a container-runtime
-    // flag. This AppHost is pinned to the 9.5.2 support floor by our own choice, so it compensates
-    // itself - which is also what a Linux user on pre-13.3 Aspire has to do.
-    .WithContainerRuntimeArgs("--add-host", "host.docker.internal:host-gateway")
+builder.AddCoreWcfExplorer("wcf-explorer", imageTag: string.IsNullOrWhiteSpace(explorerTag) ? null : explorerTag)
     .WithCoreWcfService(echoService, metadataPath: "/echo", name: "Echo service")
     .WithCoreWcfService(echoService, metadataPath: "/inventory", name: "Inventory service");
 
