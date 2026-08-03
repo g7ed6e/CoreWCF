@@ -7,13 +7,13 @@ using Xunit;
 namespace CoreWcfExplorer.IntegrationTests;
 
 /// <summary>
-/// Binds the shared fixture to the AppHost pinned at the Aspire 9.5.2 support floor, where the CoreWCF
-/// service runs as a container alongside the explorer.
+/// Binds the shared fixture to the Aspire 13.4.6 AppHost, where the CoreWCF service runs as a project
+/// resource and the explorer container reaches it through Aspire's container tunnel.
 /// </summary>
 public sealed class ExplorerAppHostFixture : ExplorerAppHostFixtureBase
 {
     protected override Task<IDistributedApplicationTestingBuilder> CreateBuilderAsync()
-        => DistributedApplicationTestingBuilder.CreateAsync<Projects.CoreWcfExplorer_IntegrationTests_AppHost>();
+        => DistributedApplicationTestingBuilder.CreateAsync<Projects.CoreWcfExplorer_IntegrationTests_Aspire13_AppHost>();
 }
 
 [CollectionDefinition(nameof(ExplorerAppHostCollection))]

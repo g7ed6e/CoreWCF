@@ -35,6 +35,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The tests themselves are shared with the Aspire 13.x project next door, so both lines are held
+         to exactly the same assertions. Only the fixture, which names the AppHost entry point, differs. -->
+    <Compile Include="../shared/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Supplies the Projects.* entry-point type DistributedApplicationTestingBuilder starts. -->
     <ProjectReference Include="../CoreWcfExplorer.IntegrationTests.AppHost/CoreWcfExplorer.IntegrationTests.AppHost.csproj" />
   </ItemGroup>

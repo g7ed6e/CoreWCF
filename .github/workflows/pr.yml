@@ -239,7 +239,9 @@ jobs:
           repository: corewcf/sample-service
           image-tag: ${{ steps.image.outputs.tag }}
 
-      - name: Run integration tests
+      # The support floor. Both resources are containers, because Aspire 9.x cannot reach a project
+      # endpoint from a container on Linux.
+      - name: Run integration tests (Aspire 9.5.2)
         shell: bash
         env:
           CoreWcfExplorer__ImageTag: ${{ steps.image.outputs.tag }}
@@ -249,6 +251,19 @@ jobs:
           dotnet test src/CoreWCF.Aspire.Hosting/integrationtests/CoreWCF.Aspire.Hosting.IntegrationTests/CoreWCF.Aspire.Hosting.IntegrationTests.csproj \
             -c Release \
             --logger "trx;LogFileName=CoreWCF.Aspire.Hosting.IntegrationTests.trx" \
+            --results-directory TestResults
+
+      # The current line, and the topology consumers actually write: the CoreWCF service is a project
+      # resource, reached through Aspire's container tunnel. Same assertions - the test code is shared.
+      - name: Run integration tests (Aspire 13.4.6)
+        shell: bash
+        env:
+          CoreWcfExplorer__ImageTag: ${{ steps.image.outputs.tag }}
+          ASPIRE_ALLOW_UNSECURED_TRANSPORT: 'true'
+        run: |
+          dotnet test src/CoreWCF.Aspire.Hosting/integrationtests/CoreWCF.Aspire.Hosting.Aspire13.IntegrationTests/CoreWCF.Aspire.Hosting.Aspire13.IntegrationTests.csproj \
+            -c Release \
+            --logger "trx;LogFileName=CoreWCF.Aspire.Hosting.Aspire13.IntegrationTests.trx" \
             --results-directory TestResults
 
       - name: Upload test results

@@ -3,19 +3,32 @@
 End-to-end tests for `CoreWCF.Aspire.Hosting`. They start a real Aspire AppHost, which runs the real
 explorer **container image** and a real CoreWCF service, and then drive the explorer over HTTP.
 
-| Project | What it is |
-| --- | --- |
-| `CoreWcfExplorer.IntegrationTests.AppHost` | The AppHost under test. Registers the explorer with `AddCoreWcfExplorer` — the container path the package ships — rather than the `AddProject` shortcut the sample uses. |
-| `CoreWCF.Aspire.Hosting.IntegrationTests` | The tests, driven through `Aspire.Hosting.Testing`. |
+Both ends of the supported Aspire range are covered, because they reach the service in genuinely
+different ways:
 
-Both the explorer **and** the CoreWCF service run as containers. That is forced by the Aspire version
-this AppHost is pinned to: on the 9.5.2 support floor a container cannot reach a proxied *project*
-endpoint on Linux. The address handed to the container is `host.docker.internal`, which does not
-resolve there, and mapping it onto the bridge gateway only moves the failure along to
-`Connection refused`, because the proxy is not listening on that interface. Aspire 13.3 fixed this
-properly with the container tunnel; below it, putting both resources on the container network — where
-they address each other by resource name — is the only way to exercise the explorer against a real
-service.
+| Project | Aspire | The CoreWCF service is… |
+| --- | --- | --- |
+| `CoreWcfExplorer.IntegrationTests.AppHost` + `CoreWCF.Aspire.Hosting.IntegrationTests` | 9.5.2 (the floor) | a **container**, alongside the explorer |
+| `CoreWcfExplorer.IntegrationTests.Aspire13.AppHost` + `CoreWCF.Aspire.Hosting.Aspire13.IntegrationTests` | 13.4.6 (current) | a **project resource**, reached through the container tunnel |
+
+The assertions live in `shared/` and are compiled into both, so neither line gets an easier test than
+the other. Only the fixture differs, because the AppHost entry point has to be a compile-time type.
+
+**Why the floor uses a containerised service.** On Aspire 9.x a container cannot reach a proxied
+project endpoint on Linux. The address handed to the container is `host.docker.internal`, which does
+not resolve there, and mapping it onto the bridge gateway only moves the failure along to
+`Connection refused`, because the proxy is not listening on that interface. Putting both resources on
+the container network — where they address each other by resource name — is the only way to exercise
+the explorer against a real service on that line.
+
+**Why 13.4.6 uses a project resource.** Aspire 13.3 introduced the container tunnel, which makes
+container-to-host work on every platform, so the explorer resolves the service as
+`http://aspire.dev.internal:<port>` via a tunnel container instead. A project resource is what
+consumers actually write, and nothing else in the repo exercises that topology.
+
+Two test projects rather than one multi-targeted project: `DistributedApplicationTestingBuilder`
+loads the AppHost entry point in-process, so a single assembly cannot host both Aspire lines without
+their assemblies colliding.
 
 ## Why these are separate from the unit tests
 
@@ -45,8 +58,13 @@ docker tag corewcf/aspire-explorer:local-test ghcr.io/corewcf/aspire-explorer:lo
 dotnet publish src/CoreWCF.Aspire.Hosting/samples/CoreWcfSampleService/CoreWcfSampleService.csproj \
   -c Release -t:PublishContainer -p:ContainerImageTag=local-test
 
+# The 9.5.2 floor - both resources as containers.
 CoreWcfExplorer__ImageTag=local-test CoreWcfSampleService__ImageTag=local-test \
   dotnet test src/CoreWCF.Aspire.Hosting/integrationtests/CoreWCF.Aspire.Hosting.IntegrationTests
+
+# Aspire 13.4.6 - the service runs as a project, so it needs no image. Requires a .NET 10 SDK.
+CoreWcfExplorer__ImageTag=local-test \
+  dotnet test src/CoreWCF.Aspire.Hosting/integrationtests/CoreWCF.Aspire.Hosting.Aspire13.IntegrationTests
 ```
 
 Aspire uses a locally tagged image as-is; nothing is pulled. With `CoreWcfExplorer__ImageTag` unset
@@ -54,9 +72,15 @@ the AppHost falls back to the package default (`latest`), which is what a consum
 package gets — so an unset variable tests the published image, not a local build.
 
 To confirm the topology rather than just the result, inspect the explorer container while the tests
-run: `CoreWcf__Services__0__Url` should read `http://echo-service:8080`. A `host.docker.internal`
-address there means the service is being run as a project again, and the tests will pass on Docker
-Desktop while failing on Linux.
+run and look at `CoreWcf__Services__0__Url`:
+
+| Run | Expected address |
+| --- | --- |
+| 9.5.2 | `http://echo-service:8080` — container network DNS |
+| 13.4.6 | `http://aspire.dev.internal:<port>` — the tunnel, with a `dcptun_*` container alongside |
+
+A `host.docker.internal` address in either means the host is back in the path, and the tests will
+pass on Docker Desktop while failing on Linux — which is exactly how this was originally missed.
 
 ## Why they are not in the CI test matrix
 
