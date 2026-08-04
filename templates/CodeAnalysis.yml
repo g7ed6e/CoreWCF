@@ -16,6 +16,19 @@ stages:
       vmImage: 'ubuntu-latest'
     steps:
 
+    # This job builds every project and every target framework, runs the whole test suite with
+    # coverage, and then has ReportGenerator render an HTML report for the codebase. On a hosted
+    # agent that has been enough to fill the disk: the agent was lost mid-report with "/ is lower
+    # than 5%; currently used: 99.80%", which surfaces as an abandoned job rather than a task
+    # failure. Reclaiming the toolchains this job will never use buys well over 10 GB of headroom.
+    # hostedtoolcache is deliberately untouched - dotnet is resolved from there.
+    - bash: |
+        set -euo pipefail
+        echo "Before:"; df -h /
+        sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/share/swift || true
+        echo "After:"; df -h /
+      displayName: Free disk space
+
     - task: UseDotNet@2
       displayName: 'Use .NET 11 sdk'
       inputs:
