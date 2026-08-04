@@ -1,6 +1,11 @@
 parameters:
 - name: testProjects
   default: ''
+# Same list minus the projects that have no .NET Framework flavour. DotNetCoreCLI@2 runs every
+# match against the leg's target framework, so on the net472 legs a .NET-only project fails with
+# "test source file ... was not found".
+- name: netFrameworkTestProjects
+  default: ''
 - name: configurations
   default: Debug,Release
 
@@ -129,78 +134,25 @@ stages:
         displayName: Restore +x on CoreWCF.*.Tests executables
         condition: eq(variables.imageName, 'ubuntu-latest')
 
-      # Runs the projects itself rather than handing the glob to DotNetCoreCLI@2, because that task
-      # runs every match against the leg's target framework and a project that does not target it
-      # fails with "test source file ... was not found". Asking MSBuild what each project actually
-      # targets keeps this correct as projects change their TFM list - the Aspire projects, for one,
-      # are .NET (Core) only and have no net472 flavour - without maintaining an exclude list.
-      - bash: |
-          set -euo pipefail
-          tfm="$(targetFramework)"
-          configuration="${{ configuration }}"
-          results="$(Agent.TempDirectory)"
-
-          rc=0
-          ran=0
-          while IFS= read -r -d '' proj; do
-            name="${proj##*/}"
-            name="${name%.csproj}"
-
-            # The templates tests have their own stage.
-            if [ "$name" = "CoreWCF.Templates.Tests" ]; then
-              continue
-            fi
-
-            # -getProperty evaluates without building or restoring.
-            tfms="$(dotnet msbuild "$proj" -nologo -getProperty:TargetFrameworks 2>/dev/null || true)"
-            tfms="${tfms//[[:space:]]/}"
-            if [ -z "$tfms" ]; then
-              # Single-target projects leave TargetFrameworks empty.
-              tfms="$(dotnet msbuild "$proj" -nologo -getProperty:TargetFramework 2>/dev/null || true)"
-              tfms="${tfms//[[:space:]]/}"
-            fi
-            if [ -z "$tfms" ]; then
-              echo "##vso[task.logissue type=error]Could not determine target frameworks for $proj."
-              rc=1
-              continue
-            fi
-
-            case ";$tfms;" in
-              *";$tfm;"*) ;;
-              *)
-                echo "Skipping $proj - does not target $tfm (targets: $tfms)."
-                continue
-                ;;
-            esac
-
-            ran=$((ran + 1))
-            echo "##[group]Testing $proj ($configuration / $tfm)"
-            if ! dotnet test "$proj" \
-                  --no-restore --no-build \
-                  -c "$configuration" -f "$tfm" $(testArgs) \
-                  --logger "trx;LogFileName=$name-$tfm.trx" \
-                  --results-directory "$results"; then
-              rc=1
-            fi
-            echo "##[endgroup]"
-          done < <(find . -type f -name 'CoreWCF.*.Tests.csproj' -print0 | sort -z)
-
-          # Without this, a mistyped matrix TFM would skip every project and pass green.
-          if [ "$ran" -eq 0 ]; then
-            echo "##vso[task.logissue type=error]No test project targets $tfm; nothing ran."
-            rc=1
-          fi
-          exit $rc
+      - task: DotNetCoreCLI@2
         displayName: Run Tests
+        condition: and(succeeded(), ne(variables.targetFramework, 'net472'))
         timeoutInMinutes: 30
-
-      - task: PublishTestResults@2
-        displayName: Publish test results
-        condition: succeededOrFailed()
         inputs:
-          testResultsFormat: VSTest
-          testResultsFiles: '**/*.trx'
-          searchFolder: $(Agent.TempDirectory)
-          mergeTestResults: true
-          publishRunAttachments: true
+          command: 'test'
+          projects: ${{ parameters.testProjects }}
+          publishTestResults: true
+          arguments: '--no-restore --no-build -c ${{ configuration }} -f $(targetFramework) $(testArgs)'
+
+      # Same task against the narrower list. targetFramework is a matrix variable, so it only exists
+      # at run time - which is why this is a second task with a condition rather than an ${{ if }}.
+      - task: DotNetCoreCLI@2
+        displayName: Run Tests (.NET Framework)
+        condition: and(succeeded(), eq(variables.targetFramework, 'net472'))
+        timeoutInMinutes: 30
+        inputs:
+          command: 'test'
+          projects: ${{ parameters.netFrameworkTestProjects }}
+          publishTestResults: true
+          arguments: '--no-restore --no-build -c ${{ configuration }} -f $(targetFramework) $(testArgs)'
 
