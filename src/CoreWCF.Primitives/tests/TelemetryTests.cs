@@ -168,15 +168,18 @@ public class TelemetryTests
         var startedActivities = new ConcurrentBag<Activity>();
         var stoppedActivities = new ConcurrentBag<Activity>();
 
-        // Filter by the unique DisplayName (the SOAP action) so activities created by other
-        // tests sharing the static CoreWCF.Primitives ActivitySource cannot skew the counts.
+        // Capture every activity here and filter by DisplayName only at assertion time. The
+        // DisplayName (the SOAP action) is assigned inside CreateActivity *after* StartActivity
+        // returns, but ActivityStarted fires *during* StartActivity, so at that moment DisplayName
+        // is still the raw activity name. Filtering inside the callback would therefore drop every
+        // activity. Activity is a reference type, so reading DisplayName later sees the final value.
         // See the detailed note in Basic_Telemetry_Test about ActivityListener attachment timing.
         using var listener = new ActivityListener
         {
             ShouldListenTo = activitySource => activitySource.Name == "CoreWCF.Primitives",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStarted = activity => { if (activity.DisplayName == echoAction) startedActivities.Add(activity); },
-            ActivityStopped = activity => { if (activity.DisplayName == echoAction) stoppedActivities.Add(activity); }
+            ActivityStarted = activity => startedActivities.Add(activity),
+            ActivityStopped = activity => stoppedActivities.Add(activity)
         };
 
         string serviceAddress = "http://localhost/dummy";
@@ -238,9 +241,11 @@ public class TelemetryTests
         await Task.WhenAll(dispatchTasks);
 
         // The Activity is stopped synchronously (before the reply is sent), so by the time every
-        // reply has arrived every Activity that is going to be stopped already has been.
-        var startedIds = startedActivities.Select(a => a.SpanId).ToList();
-        var stoppedIds = stoppedActivities.Select(a => a.SpanId).ToHashSet();
+        // reply has arrived every Activity that is going to be stopped already has been. Filter by
+        // the unique action DisplayName so activities from other tests sharing the static
+        // CoreWCF.Primitives ActivitySource cannot skew the counts.
+        var startedIds = startedActivities.Where(a => a.DisplayName == echoAction).Select(a => a.SpanId).ToList();
+        var stoppedIds = stoppedActivities.Where(a => a.DisplayName == echoAction).Select(a => a.SpanId).ToHashSet();
 
         Assert.Equal(RequestCount, startedIds.Count);
         Assert.Equal(RequestCount, startedIds.Distinct().Count());
