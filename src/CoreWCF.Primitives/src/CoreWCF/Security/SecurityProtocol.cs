@@ -467,17 +467,25 @@ namespace CoreWCF.Security
             }
 
             TimeoutHelper timeoutHelper = new TimeoutHelper(timeout);
+            RecoverableTokenRegistration registration = default;
             IList<SupportingTokenProviderSpecification> supportingTokenProviders = GetSupportingTokenProviders(message.Headers.Action);
             if (supportingTokenProviders != null && supportingTokenProviders.Count > 0)
             {
                 supportingTokens = new Collection<SupportingTokenSpecification>();
-                for (int i = 0; i < supportingTokenProviders.Count; ++i)
+                try
                 {
-                    SupportingTokenProviderSpecification spec = supportingTokenProviders[i];
-                    SecurityToken supportingToken;
-                    supportingToken = await spec.TokenProvider.GetTokenAsync(timeoutHelper.GetCancellationToken());
+                    for (int i = 0; i < supportingTokenProviders.Count; ++i)
+                    {
+                        SupportingTokenProviderSpecification spec = supportingTokenProviders[i];
+                        SecurityToken supportingToken;
+                        supportingToken = await spec.TokenProvider.GetTokenAsync(timeoutHelper.GetCancellationToken(out registration));
 
-                    supportingTokens.Add(new SupportingTokenSpecification(supportingToken, EmptyReadOnlyCollection<IAuthorizationPolicy>.Instance, spec.SecurityTokenAttachmentMode, spec.TokenParameters));
+                        supportingTokens.Add(new SupportingTokenSpecification(supportingToken, EmptyReadOnlyCollection<IAuthorizationPolicy>.Instance, spec.SecurityTokenAttachmentMode, spec.TokenParameters));
+                    }
+                }
+                finally
+                {
+                    registration.Dispose();
                 }
             }
 
@@ -556,13 +564,19 @@ namespace CoreWCF.Security
             }
 
             SecurityToken token;
+            var tokenTimeoutHelper = new TimeoutHelper(timeout);
+            var tokenTimeoutToken = tokenTimeoutHelper.GetCancellationToken(out RecoverableTokenRegistration registration);
             try
             {
-                token = await provider.GetTokenAsync(new TimeoutHelper(timeout).GetCancellationToken());
+                token = await provider.GetTokenAsync(tokenTimeoutToken);
             }
             catch (SecurityTokenException exception)
             {
                 throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new MessageSecurityException(SR.Format(SR.TokenProviderCannotGetTokensForTarget, target), exception));
+            }
+            finally
+            {
+                registration.Dispose();
             }
             catch (SecurityNegotiationException sne)
             {

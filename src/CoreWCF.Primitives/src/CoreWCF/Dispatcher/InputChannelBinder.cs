@@ -64,7 +64,15 @@ namespace CoreWCF.Dispatcher
         public void CloseAfterFault(TimeSpan timeout)
         {
             var helper = new TimeoutHelper(timeout);
-            _channel.CloseAsync(helper.GetCancellationToken()).GetAwaiter().GetResult();
+            var token = helper.GetCancellationToken(out RecoverableTokenRegistration registration);
+            try
+            {
+                _channel.CloseAsync(token).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                registration.Dispose();
+            }
         }
 
         public RequestContext CreateRequestContext(Message message)

@@ -1449,17 +1449,19 @@ namespace CoreWCF.Security
                     {
                         response = Message.CreateMessage(message.Version, renewFault, DotNetSecurityStrings.SecuritySessionFaultAction);
                     }
+                    RecoverableTokenRegistration registration = default;
                     try
                     {
                         PrepareReply(message, response);
                         TimeoutHelper timeoutHelper = new TimeoutHelper(timeout);
-                        response = SecurityProtocol.SecureOutgoingMessage(response, timeoutHelper.GetCancellationToken());
+                        response = SecurityProtocol.SecureOutgoingMessage(response, timeoutHelper.GetCancellationToken(out registration));
                         response.Properties.AllowOutputBatching = false;
-                        var messageTask = SendMessageAsync(requestContext, response, timeoutHelper.GetCancellationToken());
+                        var messageTask = SendMessageAsync(requestContext, response, timeoutHelper.GetCancellationToken(out registration));
                         messageTask.GetAwaiter().GetResult();
                     }
                     finally
                     {
+                        registration.Dispose();
                         response.Close();
                     }
                     //  SecurityTraceRecordHelper.TraceSessionRenewalFaultSent(this.currentSessionToken, GetLocalUri(), message);
@@ -2528,9 +2530,18 @@ namespace CoreWCF.Security
                     return OpenAsync();
                 }
 
-                public Task SendAsync(Message message)
+                public async Task SendAsync(Message message)
                 {
-                    return SendAsync(message, new TimeoutHelper(ServiceDefaults.SendTimeout).GetCancellationToken());
+                    var helper = new TimeoutHelper(ServiceDefaults.SendTimeout);
+                    var token = helper.GetCancellationToken(out RecoverableTokenRegistration registration);
+                    try
+                    {
+                        await SendAsync(message, token);
+                    }
+                    finally
+                    {
+                        registration.Dispose();
+                    }
                 }
 
                 public Task SendAsync(Message message, CancellationToken token)
