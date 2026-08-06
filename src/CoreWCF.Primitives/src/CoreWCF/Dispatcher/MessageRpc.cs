@@ -26,6 +26,10 @@ namespace CoreWCF.Dispatcher
         internal readonly ServiceHostBase Host;
         internal readonly OperationContext OperationContext;
         //internal ServiceModelActivity Activity;
+        // The OpenTelemetry Activity for this request. Stored per-request (rather than on the
+        // shared ImmutableDispatchRuntime) so concurrent requests cannot overwrite and leak each
+        // other's Activity. See https://github.com/CoreWCF/CoreWCF/issues/1677.
+        internal Activity Activity;
         internal Guid ResponseActivityId;
         internal IAsyncResult AsyncResult;
         internal Task TaskResult;
@@ -77,7 +81,7 @@ namespace CoreWCF.Dispatcher
             // TODO: ChannelHandler supplied an ErrorHandler, need to supply this some other way.
             //Fx.Assert(channelHandler != null, "System.ServiceModel.Dispatcher.MessageRpc.MessageRpc(), channelHandler == null");
 
-            //this.Activity = null;
+            Activity = null;
             //this.EventTraceActivity = eventTraceActivity;
             AsyncResult = null;
             TaskResult = null;
