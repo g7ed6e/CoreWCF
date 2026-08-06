@@ -215,17 +215,10 @@ namespace CoreWCF.Channels.Framing
         public override void WriteByte(byte value)
         {
             var timeoutHelper = new TimeoutHelper(_timeouts.SendTimeout);
-            CancellationToken ct = timeoutHelper.GetCancellationToken(out RecoverableTokenRegistration registration);
-            try
-            {
-                WriteChunkSizeAsync(1, ct).GetAwaiter().GetResult();
-                _connection.Output.WriteAsync(new byte[] { value }, ct).GetAwaiter().GetResult();
-                _connection.Output.FlushAsync();
-            }
-            finally
-            {
-                registration.Dispose();
-            }
+            CancellationToken ct = timeoutHelper.GetCancellationToken();
+            WriteChunkSizeAsync(1, ct).GetAwaiter().GetResult();
+            _connection.Output.WriteAsync(new byte[] { value }, ct).GetAwaiter().GetResult();
+            _connection.Output.FlushAsync();
         }
 
         public override void Write(byte[] buffer, int offset, int count)

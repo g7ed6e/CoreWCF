@@ -168,14 +168,7 @@ namespace CoreWCF.Dispatcher
         public void CloseAfterFault(TimeSpan timeout)
         {
             var helper = new TimeoutHelper(timeout);
-            var token = helper.GetCancellationToken(out RecoverableTokenRegistration registration);
-            // Fire-and-forget close; release the coalesced token source once it completes.
-            _ = _channel.CloseAsync(token).ContinueWith(
-                (_, state) => ((RecoverableTokenRegistration)state).Dispose(),
-                registration,
-                CancellationToken.None,
-                TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+            _channel.CloseAsync(helper.GetCancellationToken());
             AbortRequests();
         }
 
