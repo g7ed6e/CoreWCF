@@ -25,7 +25,6 @@ namespace CoreWCF.Dispatcher
         internal readonly object[] Correlation;
         internal readonly ServiceHostBase Host;
         internal readonly OperationContext OperationContext;
-        //internal ServiceModelActivity Activity;
         // The OpenTelemetry Activity for this request. Stored per-request (rather than on the
         // shared ImmutableDispatchRuntime) so concurrent requests cannot overwrite and leak each
         // other's Activity. See https://github.com/CoreWCF/CoreWCF/issues/1677.

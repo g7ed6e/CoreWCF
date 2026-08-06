@@ -978,10 +978,9 @@ namespace CoreWCF.Dispatcher
                     rpc.ChannelHandler.InstanceContextServiceThrottle.DeactivateInstanceContext();
                 }
 
-                //if (rpc.Activity != null && DiagnosticUtility.ShouldUseActivity)
-                //{
-                //    rpc.Activity.Stop();
-                //}
+                // The desktop WCF stop of rpc.Activity lived here. rpc.Activity is now stopped in
+                // PrepareReplyAsync, once the reply tags are applied, with a safety net in
+                // MessageRpc.ProcessAsync for paths that never reach the reply code.
             }
 
             ErrorBehavior.HandleError(rpc);

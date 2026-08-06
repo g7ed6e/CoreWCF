@@ -226,7 +226,7 @@ public class TelemetryTests
             // Start each pipeline on its own thread-pool work item so the requests do not share the
             // loop's execution context (OperationContext.Current is ambient state the synchronous
             // head of the pipeline writes to).
-            dispatchTasks.Add(Task.Run(() => dispatcher.DispatchAsync(requestContext)));
+            dispatchTasks.Add(Task.Run(() => dispatcher.DispatchAsync(requestContext), TestContext.Current.CancellationToken));
         }
 
         bool allRequestsEntered = await CompletesWithinAsync(ConcurrentTelemetryService.AllRequestsEntered.Task,
@@ -247,7 +247,13 @@ public class TelemetryTests
 
         foreach (var requestContext in contexts)
         {
-            Assert.True(await requestContext.WaitForReplyAsync(TestContext.Current.CancellationToken), "Dispatcher didn't send reply");
+            // Bound the wait: WaitForReplyAsync only observes the test host's cancellation token, so
+            // a pipeline that completed without replying would otherwise park here until the whole
+            // run is cancelled instead of failing with a usable message.
+            Task<bool> replyTask = requestContext.WaitForReplyAsync(TestContext.Current.CancellationToken);
+            Assert.True(await CompletesWithinAsync(replyTask, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken),
+                "Dispatcher didn't send reply within 30s.");
+            Assert.True(await replyTask, "Dispatcher didn't send reply");
         }
 
         // The Activity is stopped synchronously (before the reply is sent), so by the time every
