@@ -244,18 +244,23 @@ public class TelemetryTests
         // reply has arrived every Activity that is going to be stopped already has been. Filter by
         // the unique action DisplayName so activities from other tests sharing the static
         // CoreWCF.Primitives ActivitySource cannot skew the counts.
-        var startedIds = startedActivities.Where(a => a.DisplayName == echoAction).Select(a => a.SpanId).ToList();
-        var stoppedIds = stoppedActivities.Where(a => a.DisplayName == echoAction).Select(a => a.SpanId).ToHashSet();
+        //
+        // Identify activities by object reference, not SpanId: on .NET Framework the default
+        // ActivityIdFormat is Hierarchical, so Activity.SpanId is empty for every activity and
+        // cannot distinguish them. Activity does not override Equals/GetHashCode, so HashSet and
+        // Distinct() use reference equality, which is exactly the identity we want here.
+        var started = startedActivities.Where(a => a.DisplayName == echoAction).ToList();
+        var stopped = new HashSet<Activity>(stoppedActivities.Where(a => a.DisplayName == echoAction));
 
-        Assert.Equal(RequestCount, startedIds.Count);
-        Assert.Equal(RequestCount, startedIds.Distinct().Count());
+        Assert.Equal(RequestCount, started.Count);
+        Assert.Equal(RequestCount, started.Distinct().Count());
 
         // Every started Activity must also have been stopped. With the shared-field bug the
         // overwritten Activities are never passed to Stop(), so they are missing here.
-        var leaked = startedIds.Where(id => !stoppedIds.Contains(id)).ToList();
+        var leaked = started.Where(a => !stopped.Contains(a)).ToList();
         Assert.True(leaked.Count == 0,
             $"{leaked.Count} of {RequestCount} started Activities were never stopped (leaked). " +
-            $"Started: {startedIds.Count}, distinct stopped: {stoppedIds.Count}.");
+            $"Started: {started.Count}, distinct stopped: {stopped.Count}.");
     }
 
     [CoreWCF.ServiceContract]
