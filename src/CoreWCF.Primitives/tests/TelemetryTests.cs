@@ -206,10 +206,12 @@ public class TelemetryTests
         // been created) until all RequestCount requests have arrived. This forces all the
         // Activities to be alive simultaneously, deterministically exercising the shared-field
         // race instead of relying on lucky timing.
-        using var allRequestsEntered = new CountdownEvent(RequestCount);
-        using var releaseGate = new ManualResetEventSlim(false);
-        ConcurrentTelemetryService.OnOperationEntered = allRequestsEntered;
-        ConcurrentTelemetryService.ReleaseGate = releaseGate;
+        //
+        // The operation awaits a TaskCompletionSource rather than blocking on a wait handle: a
+        // blocking wait pins one thread-pool thread per in-flight request, so the test would be
+        // gated on thread injection (roughly one thread per second above MinThreads) and time out
+        // on a runner with few cores. Awaiting parks each request without holding a thread.
+        ConcurrentTelemetryService.Reset(RequestCount);
 
         ActivitySource.AddActivityListener(listener);
 
@@ -221,24 +223,32 @@ public class TelemetryTests
             IServiceChannelDispatcher dispatcher = await serviceDispatcher.CreateServiceChannelDispatcherAsync(mockChannel);
             var requestContext = TestRequestContext.Create(serviceAddress, echoAction);
             contexts.Add(requestContext);
-            // Run the pipeline on the thread pool: the operation blocks on the gate below, so
-            // dispatching inline would stall this loop before every request is in flight.
+            // Start each pipeline on its own thread-pool work item so the requests do not share the
+            // loop's execution context (OperationContext.Current is ambient state the synchronous
+            // head of the pipeline writes to).
             dispatchTasks.Add(Task.Run(() => dispatcher.DispatchAsync(requestContext)));
         }
 
-        Assert.True(allRequestsEntered.Wait(TimeSpan.FromSeconds(30)),
-            $"Only {RequestCount - allRequestsEntered.CurrentCount} of {RequestCount} requests reached the service operation.");
+        bool allRequestsEntered = await CompletesWithinAsync(ConcurrentTelemetryService.AllRequestsEntered.Task,
+            TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
         // All Activities have now been created (and, with the bug, all but one overwritten in
         // the shared field). Let the operations complete so each runs the reply path that stops
-        // the Activity.
-        releaseGate.Set();
+        // the Activity. Release unconditionally - even when the wait above timed out - and drain
+        // the pipeline before asserting, so a failure never leaves requests parked in the
+        // operation while the test tears down.
+        ConcurrentTelemetryService.ReleaseGate.TrySetResult(true);
+        bool allRequestsCompleted = await CompletesWithinAsync(Task.WhenAll(dispatchTasks),
+            TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        Assert.True(allRequestsEntered,
+            $"Only {ConcurrentTelemetryService.EnteredRequests} of {RequestCount} requests reached the service operation.");
+        Assert.True(allRequestsCompleted, "Not every dispatched request completed within 30s.");
 
         foreach (var requestContext in contexts)
         {
             Assert.True(await requestContext.WaitForReplyAsync(TestContext.Current.CancellationToken), "Dispatcher didn't send reply");
         }
-        await Task.WhenAll(dispatchTasks);
 
         // The Activity is stopped synchronously (before the reply is sent), so by the time every
         // reply has arrived every Activity that is going to be stopped already has been. Filter by
@@ -261,6 +271,23 @@ public class TelemetryTests
         Assert.True(leaked.Count == 0,
             $"{leaked.Count} of {RequestCount} started Activities were never stopped (leaked). " +
             $"Started: {started.Count}, distinct stopped: {stopped.Count}.");
+    }
+
+    // Returns true if <paramref name="task"/> completed before the timeout elapsed, false otherwise.
+    // Unlike a blocking wait this holds no thread, and unlike awaiting the task directly it turns a
+    // hang into a reportable result instead of running until the test host kills the process.
+    private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task completed = await Task.WhenAny(task, Task.Delay(timeout, timeoutCts.Token));
+        timeoutCts.Cancel();
+        if (!ReferenceEquals(completed, task))
+        {
+            return false;
+        }
+
+        await task; // surface any faults from the awaited work
+        return true;
     }
 
     [CoreWCF.ServiceContract]
@@ -286,21 +313,43 @@ public class TelemetryTests
     {
         [CoreWCF.OperationContract]
         [System.ServiceModel.OperationContract]
-        string Echo(string echo);
+        Task<string> Echo(string echo);
     }
 
     [CoreWCF.ServiceBehavior(ConcurrencyMode = CoreWCF.ConcurrencyMode.Multiple, InstanceContextMode = CoreWCF.InstanceContextMode.Single)]
     internal class ConcurrentTelemetryService : IConcurrentTelemetryService
     {
-        internal static CountdownEvent OnOperationEntered;
-        internal static ManualResetEventSlim ReleaseGate;
+        private static int s_expectedRequests;
+        private static int s_enteredRequests;
 
-        public string Echo(string echo)
+        // Completes once s_expectedRequests requests have reached Echo.
+        internal static TaskCompletionSource<bool> AllRequestsEntered { get; private set; }
+
+        // Completed by the test to let every parked request run to completion.
+        internal static TaskCompletionSource<bool> ReleaseGate { get; private set; }
+
+        internal static int EnteredRequests => Volatile.Read(ref s_enteredRequests);
+
+        internal static void Reset(int expectedRequests)
+        {
+            s_expectedRequests = expectedRequests;
+            Volatile.Write(ref s_enteredRequests, 0);
+            // RunContinuationsAsynchronously so completing either source never runs the waiters
+            // inline on the signalling thread.
+            AllRequestsEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            ReleaseGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public async Task<string> Echo(string echo)
         {
             // Signal that this request has reached the operation (its Activity already exists),
-            // then wait until the test releases all requests at once.
-            OnOperationEntered.Signal();
-            ReleaseGate.Wait(TimeSpan.FromSeconds(30));
+            // then park - without holding a thread - until the test releases all requests at once.
+            if (Interlocked.Increment(ref s_enteredRequests) == s_expectedRequests)
+            {
+                AllRequestsEntered.TrySetResult(true);
+            }
+
+            await ReleaseGate.Task;
             return echo;
         }
     }

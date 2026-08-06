@@ -509,6 +509,27 @@ namespace CoreWCF.Dispatcher
             }
             finally
             {
+                // Safety net for the Activity owned by this rpc. It is normally stopped in
+                // ImmutableDispatchRuntime.PrepareReplyAsync, once the reply tags have been applied;
+                // this runs after that (including after the error processor above has run), so on
+                // every path that already stopped it Activity.Stop() is a no-op. It only bites when
+                // an exception escaped the pipeline without ever reaching the reply code, where the
+                // Activity would otherwise never be stopped and would live on until process exit.
+                try
+                {
+                    Activity?.Stop();
+                }
+                catch (Exception e)
+                {
+                    if (Fx.IsFatal(e))
+                    {
+#pragma warning disable CA2219 // Do not raise exceptions in finally clauses - Fx.IsFatal filters out non-process ending exceptions
+                        throw;
+#pragma warning restore CA2219 // Do not raise exceptions in finally clauses
+                    }
+                    DiagnosticUtility.TraceHandledException(e, TraceEventType.Error);
+                }
+
                 try
                 {
                     DecrementBusyCount();
