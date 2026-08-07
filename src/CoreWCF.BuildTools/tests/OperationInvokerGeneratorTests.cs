@@ -61,10 +61,452 @@ namespace MyProject
 
     [Theory]
     [MemberData(nameof(GetTestVariations))]
+    public async Task OpenGenericServiceContractDoesNotGenerateInvoker(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.Errors,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IRepositoryService<TItem, TFilter>
+        where TItem : class, new()
+        where TFilter : class, new()
+    {{
+        [{attributeNamespace}.OperationContract]
+        System.Collections.Generic.IEnumerable<TItem> Find(TFilter filter);
+
+        [{attributeNamespace}.OperationContract]
+        int CountItems(TFilter filter);
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator), "/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                }
+            }
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
+    public async Task GenericOperationOnNonGenericServiceContractDoesNotGenerateInvoker(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.Errors,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IRepositoryService
+    {{
+        [{attributeNamespace}.OperationContract]
+        TItem Find<TItem>(string id)
+            where TItem : class, new();
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator), "/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                }
+            }
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
+    public async Task ServiceContractNestedInGenericContainingTypeDoesNotGenerateInvoker(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.Errors,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    public class RepositoryHost<TItem>
+        where TItem : class, new()
+    {{
+        [{attributeNamespace}.ServiceContract]
+        public interface IRepositoryService
+        {{
+            [{attributeNamespace}.OperationContract]
+            TItem Find(string id);
+        }}
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator), "/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                }
+            }
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
+    public async Task PartiallyClosedDerivedServiceContractDoesNotGenerateInvoker(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.Errors,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IRepositoryService<TItem, TFilter>
+        where TItem : class, new()
+        where TFilter : class, new()
+    {{
+        [{attributeNamespace}.OperationContract]
+        System.Collections.Generic.IEnumerable<TItem> Find(TFilter filter);
+
+        [{attributeNamespace}.OperationContract]
+        int CountItems(TFilter filter);
+    }}
+
+    [{attributeNamespace}.ServiceContract]
+    public interface ICityRepository<TFilter> : IRepositoryService<City, TFilter>
+        where TFilter : class, new()
+    {{
+    }}
+
+    public class City
+    {{
+        public string Name {{ get; set; }}
+        public int Population {{ get; set; }}
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator), "/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                }
+            }
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
+    public async Task ClosedDerivedServiceContractGeneratesInvokersForInheritedGenericOperations(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IRepositoryService<TItem, TFilter>
+        where TItem : class, new()
+        where TFilter : class, new()
+    {{
+        [{attributeNamespace}.OperationContract]
+        System.Collections.Generic.IEnumerable<TItem> Find(TFilter filter);
+
+        [{attributeNamespace}.OperationContract]
+        int CountItems(TFilter filter);
+    }}
+
+    [{attributeNamespace}.ServiceContract]
+    public interface ICountyRepository : IRepositoryService<City, County>
+    {{
+    }}
+
+    public class City
+    {{
+        public string Name {{ get; set; }}
+        public int Population {{ get; set; }}
+    }}
+
+    public class County
+    {{
+        public string Name {{ get; set; }}
+        public string State {{ get; set; }}
+    }}
+
+    public partial class CountyRepository : ICountyRepository
+    {{
+        public System.Collections.Generic.IEnumerable<City> Find(County filter)
+        {{
+            return System.Array.Empty<City>();
+        }}
+
+        public int CountItems(County filter)
+        {{
+            return 0;
+        }}
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator), "/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                    (typeof(OperationInvokerGenerator), "OperationInvoker.g.cs", SourceText.From($$"""
+// <auto-generated>
+// Generated by the CoreWCF.BuildTools.OperationInvokerGenerator source generator. DO NOT EDIT!
+// </auto-generated>
+#nullable disable
+using System;
+using System.Threading.Tasks;
+namespace System.Runtime.CompilerServices
+{
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+    file sealed class ModuleInitializerAttribute : Attribute { }
+}
+namespace CoreWCF.Dispatcher
+{
+    // This class is used to invoke the method MyProject.IRepositoryService<MyProject.City, MyProject.County>.Find(MyProject.County).
+    file sealed class OperationInvoker0 : CoreWCF.Dispatcher.IOperationInvoker
+    {
+        public ValueTask<(object returnValue, object[] outputs)> InvokeAsync(object instance, object[] inputs)
+        {
+            MyProject.County p0;
+            p0 = inputs[0] == null ? default(MyProject.County) : (MyProject.County)inputs[0];
+            var result = ((MyProject.IRepositoryService<MyProject.City, MyProject.County>)instance).Find(p0);
+            var outputs = AllocateOutputs();
+            return new ValueTask<(object, object[])>((result, outputs));
+        }
+
+        public object[] AllocateInputs() => new object[1];
+
+        private object[] AllocateOutputs() => Array.Empty<object>();
+
+        internal static void RegisterOperationInvoker() => CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker("MyProject.IRepositoryService<MyProject.City, MyProject.County>.Find(MyProject.County)", new OperationInvoker0());
+    }
+}
+namespace CoreWCF.Dispatcher
+{
+    // This class is used to invoke the method MyProject.IRepositoryService<MyProject.City, MyProject.County>.CountItems(MyProject.County).
+    file sealed class OperationInvoker1 : CoreWCF.Dispatcher.IOperationInvoker
+    {
+        public ValueTask<(object returnValue, object[] outputs)> InvokeAsync(object instance, object[] inputs)
+        {
+            MyProject.County p0;
+            p0 = inputs[0] == null ? default(MyProject.County) : (MyProject.County)inputs[0];
+            var result = ((MyProject.IRepositoryService<MyProject.City, MyProject.County>)instance).CountItems(p0);
+            var outputs = AllocateOutputs();
+            return new ValueTask<(object, object[])>((result, outputs));
+        }
+
+        public object[] AllocateInputs() => new object[1];
+
+        private object[] AllocateOutputs() => Array.Empty<object>();
+
+        internal static void RegisterOperationInvoker() => CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker("MyProject.IRepositoryService<MyProject.City, MyProject.County>.CountItems(MyProject.County)", new OperationInvoker1());
+    }
+}
+namespace CoreWCF.Dispatcher
+{
+    file sealed class OperationInvokerModuleInitializer
+    {
+        [System.Runtime.CompilerServices.ModuleInitializer]
+        internal static void RegisterOperationInvokers()
+        {
+            OperationInvoker0.RegisterOperationInvoker();
+            OperationInvoker1.RegisterOperationInvoker();
+        }
+    }
+}
+#nullable restore
+
+""", Encoding.UTF8, SourceHashAlgorithm.Sha256)),
+                }
+            }
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
+    public async Task DiamondInheritedClosedGenericServiceContractGeneratesSingleInvoker(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IRepositoryService<TItem, TFilter>
+        where TItem : class, new()
+        where TFilter : class, new()
+    {{
+        [{attributeNamespace}.OperationContract]
+        System.Collections.Generic.IEnumerable<TItem> Find(TFilter filter);
+    }}
+
+    [{attributeNamespace}.ServiceContract]
+    public interface ICountyReader : IRepositoryService<City, County>
+    {{
+    }}
+
+    [{attributeNamespace}.ServiceContract]
+    public interface ICountyLookup : IRepositoryService<City, County>
+    {{
+    }}
+
+    [{attributeNamespace}.ServiceContract]
+    public interface IRegionalRepository : ICountyReader, ICountyLookup
+    {{
+    }}
+
+    public class City
+    {{
+        public string Name {{ get; set; }}
+        public int Population {{ get; set; }}
+    }}
+
+    public class County
+    {{
+        public string Name {{ get; set; }}
+        public string State {{ get; set; }}
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator), "/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                    (typeof(OperationInvokerGenerator), "OperationInvoker.g.cs", SourceText.From($$"""
+// <auto-generated>
+// Generated by the CoreWCF.BuildTools.OperationInvokerGenerator source generator. DO NOT EDIT!
+// </auto-generated>
+#nullable disable
+using System;
+using System.Threading.Tasks;
+namespace System.Runtime.CompilerServices
+{
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+    file sealed class ModuleInitializerAttribute : Attribute { }
+}
+namespace CoreWCF.Dispatcher
+{
+    // This class is used to invoke the method MyProject.IRepositoryService<MyProject.City, MyProject.County>.Find(MyProject.County).
+    file sealed class OperationInvoker0 : CoreWCF.Dispatcher.IOperationInvoker
+    {
+        public ValueTask<(object returnValue, object[] outputs)> InvokeAsync(object instance, object[] inputs)
+        {
+            MyProject.County p0;
+            p0 = inputs[0] == null ? default(MyProject.County) : (MyProject.County)inputs[0];
+            var result = ((MyProject.IRepositoryService<MyProject.City, MyProject.County>)instance).Find(p0);
+            var outputs = AllocateOutputs();
+            return new ValueTask<(object, object[])>((result, outputs));
+        }
+
+        public object[] AllocateInputs() => new object[1];
+
+        private object[] AllocateOutputs() => Array.Empty<object>();
+
+        internal static void RegisterOperationInvoker() => CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker("MyProject.IRepositoryService<MyProject.City, MyProject.County>.Find(MyProject.County)", new OperationInvoker0());
+    }
+}
+namespace CoreWCF.Dispatcher
+{
+    file sealed class OperationInvokerModuleInitializer
+    {
+        [System.Runtime.CompilerServices.ModuleInitializer]
+        internal static void RegisterOperationInvokers()
+        {
+            OperationInvoker0.RegisterOperationInvoker();
+        }
+    }
+}
+#nullable restore
+
+""", Encoding.UTF8, SourceHashAlgorithm.Sha256)),
+                }
+            }
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
     public async Task SimpleTest(string attributeNamespace)
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -160,10 +602,105 @@ namespace CoreWCF.Dispatcher
 
     [Theory]
     [MemberData(nameof(GetTestVariations))]
+    public async Task EscapedKeywordMethodNameTest(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IIdentityService
+    {{
+        [{attributeNamespace}.OperationContract]
+        string @lock(string input);
+    }}
+
+    public partial class IdentityService : IIdentityService
+    {{
+        public string @lock(string input)
+        {{
+            return input;
+        }}
+    }}
+}}
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator),"/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                    (typeof(OperationInvokerGenerator), "OperationInvoker.g.cs", SourceText.From($$"""
+// <auto-generated>
+// Generated by the CoreWCF.BuildTools.OperationInvokerGenerator source generator. DO NOT EDIT!
+// </auto-generated>
+#nullable disable
+using System;
+using System.Threading.Tasks;
+namespace System.Runtime.CompilerServices
+{
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+    file sealed class ModuleInitializerAttribute : Attribute { }
+}
+namespace CoreWCF.Dispatcher
+{
+    // This class is used to invoke the method MyProject.IIdentityService.lock(string).
+    file sealed class OperationInvoker0 : CoreWCF.Dispatcher.IOperationInvoker
+    {
+        public ValueTask<(object returnValue, object[] outputs)> InvokeAsync(object instance, object[] inputs)
+        {
+            string p0;
+            p0 = inputs[0] == null ? default(string) : (string)inputs[0];
+            var result = ((MyProject.IIdentityService)instance).@lock(p0);
+            var outputs = AllocateOutputs();
+            return new ValueTask<(object, object[])>((result, outputs));
+        }
+
+        public object[] AllocateInputs() => new object[1];
+
+        private object[] AllocateOutputs() => Array.Empty<object>();
+
+        internal static void RegisterOperationInvoker() => CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker("MyProject.IIdentityService.lock(string)", new OperationInvoker0());
+    }
+}
+namespace CoreWCF.Dispatcher
+{
+    file sealed class OperationInvokerModuleInitializer
+    {
+        [System.Runtime.CompilerServices.ModuleInitializer]
+        internal static void RegisterOperationInvokers()
+        {
+            OperationInvoker0.RegisterOperationInvoker();
+        }
+    }
+}
+#nullable restore
+
+""", Encoding.UTF8, SourceHashAlgorithm.Sha256)),
+                },
+            },
+        };
+
+        await test.RunAsync();
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
     public async Task NoNamespaceTest(string attributeNamespace)
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -260,6 +797,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -304,6 +842,7 @@ build_property.EnableCoreWCFOperationInvokerGenerator = true
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -351,6 +890,7 @@ private partial class Container
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -484,6 +1024,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -583,6 +1124,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -676,6 +1218,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -769,6 +1312,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -862,6 +1406,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -955,6 +1500,7 @@ namespace CoreWCF.Dispatcher
     {
         var test = new VerifyGenerator.Test
         {
+            CompilerDiagnostics = CompilerDiagnostics.None,
             TestState =
             {
                 Sources =
@@ -1041,5 +1587,104 @@ namespace CoreWCF.Dispatcher
 
         await test.RunAsync();
     }
-}
 
+    [Theory]
+    [MemberData(nameof(GetTestVariations))]
+    public async Task NullableReferenceTypesTest(string attributeNamespace)
+    {
+        var test = new VerifyGenerator.Test
+        {
+            CompilerDiagnostics = CompilerDiagnostics.None,
+            TestState =
+            {
+                Sources =
+                {
+@$"
+#nullable enable
+namespace MyProject
+{{
+    [{attributeNamespace}.ServiceContract]
+    public interface IIdentityService
+    {{
+        [{attributeNamespace}.OperationContract]
+        string? Echo(string? input, uint? count, System.DateTime? date);
+    }}
+
+    public partial class IdentityService : IIdentityService
+    {{
+        public string? Echo(string? input, uint? count, System.DateTime? date)
+        {{
+            return input;
+        }}
+    }}
+}}
+#nullable restore
+"
+                },
+                AnalyzerConfigFiles =
+                {
+                    (typeof(OperationInvokerGenerator),"/.globalconfig", """
+is_global = true
+build_property.EnableCoreWCFOperationInvokerGenerator = true
+""")
+                },
+                GeneratedSources =
+                {
+                    (typeof(OperationInvokerGenerator), "OperationInvoker.g.cs", SourceText.From("""
+// <auto-generated>
+// Generated by the CoreWCF.BuildTools.OperationInvokerGenerator source generator. DO NOT EDIT!
+// </auto-generated>
+#nullable disable
+using System;
+using System.Threading.Tasks;
+namespace System.Runtime.CompilerServices
+{
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+    file sealed class ModuleInitializerAttribute : Attribute { }
+}
+namespace CoreWCF.Dispatcher
+{
+    // This class is used to invoke the method MyProject.IIdentityService.Echo(string, uint?, System.DateTime?).
+    file sealed class OperationInvoker0 : CoreWCF.Dispatcher.IOperationInvoker
+    {
+        public ValueTask<(object returnValue, object[] outputs)> InvokeAsync(object instance, object[] inputs)
+        {
+            string p0;
+            p0 = inputs[0] == null ? default(string) : (string)inputs[0];
+            uint? p1;
+            p1 = inputs[1] == null ? default(uint?) : (uint?)inputs[1];
+            System.DateTime? p2;
+            p2 = inputs[2] == null ? default(System.DateTime?) : (System.DateTime?)inputs[2];
+            var result = ((MyProject.IIdentityService)instance).Echo(p0, p1, p2);
+            var outputs = AllocateOutputs();
+            return new ValueTask<(object, object[])>((result, outputs));
+        }
+
+        public object[] AllocateInputs() => new object[3];
+
+        private object[] AllocateOutputs() => Array.Empty<object>();
+
+        internal static void RegisterOperationInvoker() => CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker("MyProject.IIdentityService.Echo(string, uint?, System.DateTime?)", new OperationInvoker0());
+    }
+}
+namespace CoreWCF.Dispatcher
+{
+    file sealed class OperationInvokerModuleInitializer
+    {
+        [System.Runtime.CompilerServices.ModuleInitializer]
+        internal static void RegisterOperationInvokers()
+        {
+            OperationInvoker0.RegisterOperationInvoker();
+        }
+    }
+}
+#nullable restore
+
+""", Encoding.UTF8, SourceHashAlgorithm.Sha256)),
+                },
+            },
+        };
+
+        await test.RunAsync();
+    }
+}

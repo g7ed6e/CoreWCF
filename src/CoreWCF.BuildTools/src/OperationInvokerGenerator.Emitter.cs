@@ -4,6 +4,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 
 namespace CoreWCF.BuildTools;
@@ -15,6 +16,30 @@ public sealed partial class OperationInvokerGenerator
         private readonly StringBuilder _builder;
         private readonly OperationInvokerSourceGenerationContext _sourceGenerationContext;
         private readonly SourceGenerationSpec _generationSpec;
+
+        /// <summary>
+        /// SymbolDisplayFormat that excludes nullable annotations to match reflection-based key generation.
+        /// Reflection-based MethodInfo does not expose nullable reference type annotations, so we need to
+        /// exclude them from the generated key to ensure the source generator key matches the runtime key.
+        /// This prevents PlatformNotSupportedException when UseGeneratedOperationInvokers is enabled.
+        /// </summary>
+        private static readonly SymbolDisplayFormat s_methodDisplayFormat = new SymbolDisplayFormat(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+            genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+            memberOptions: SymbolDisplayMemberOptions.IncludeParameters | SymbolDisplayMemberOptions.IncludeContainingType,
+            parameterOptions: SymbolDisplayParameterOptions.IncludeType | SymbolDisplayParameterOptions.IncludeParamsRefOut,
+            miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
+
+        /// <summary>
+        /// SymbolDisplayFormat for emitting type references in generated code. Mirrors the default
+        /// CSharpErrorMessageFormat but strips nullable reference type annotations because the generated
+        /// file is wrapped in a '#nullable disable' context. Emitting NRT annotations like 'string?' under
+        /// '#nullable disable' produces CS8669 warnings (see issue #1712). Nullable value types such as
+        /// 'int?' are unaffected because they are System.Nullable&lt;T&gt; rather than NRT annotations.
+        /// </summary>
+        private static readonly SymbolDisplayFormat s_typeDisplayFormat = SymbolDisplayFormat.CSharpErrorMessageFormat
+            .RemoveMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
         public Emitter(in OperationInvokerSourceGenerationContext sourceGenerationContext, in SourceGenerationSpec generationSpec)
         {
@@ -84,10 +109,11 @@ public sealed partial class OperationInvokerGenerator
         {
             var indentor = new Indentor();
             string operationInvokerTypeName = GetOperationInvokerTypeName(index);
+            string escapedMethodName = EscapeIdentifier(operationContractSpec.Method!.Name);
             _builder.AppendLine($$"""
                                   namespace CoreWCF.Dispatcher
                                   {
-                                      // This class is used to invoke the method {{operationContractSpec.Method.ToDisplayString()}}.
+                                      // This class is used to invoke the method {{operationContractSpec.Method.ToDisplayString(s_methodDisplayFormat)}}.
                                       file sealed class {{operationInvokerTypeName}} : CoreWCF.Dispatcher.IOperationInvoker
                                       {
                                   """);
@@ -114,10 +140,10 @@ public sealed partial class OperationInvokerGenerator
             List<string> invocationParams = new();
             foreach (var parameter in operationContractSpec.Method.Parameters)
             {
-                _builder.AppendLine($"{indentor}{parameter.Type.ToDisplayString()} p{i};");
+                _builder.AppendLine($"{indentor}{parameter.Type.ToDisplayString(s_typeDisplayFormat)} p{i};");
                 if (FlowsIn(parameter))
                 {
-                    _builder.AppendLine($"{indentor}p{i} = inputs[{inputParameterCount}] == null ? default({parameter.Type.ToDisplayString()}) : ({parameter.Type.ToDisplayString()})inputs[{inputParameterCount}];");
+                    _builder.AppendLine($"{indentor}p{i} = inputs[{inputParameterCount}] == null ? default({parameter.Type.ToDisplayString(s_typeDisplayFormat)}) : ({parameter.Type.ToDisplayString(s_typeDisplayFormat)})inputs[{inputParameterCount}];");
                     inputParameterCount++;
                 }
 
@@ -135,22 +161,22 @@ public sealed partial class OperationInvokerGenerator
             {
                 if (isTaskReturnType)
                 {
-                    _builder.AppendLine($"{indentor}await (({operationContractSpec.Method.ContainingType.ToDisplayString()})instance).{operationContractSpec.Method.Name}({string.Join(", ", invocationParams)});");
+                    _builder.AppendLine($"{indentor}await (({operationContractSpec.Method.ContainingType.ToDisplayString(s_typeDisplayFormat)})instance).{escapedMethodName}({string.Join(", ", invocationParams)});");
                 }
                 else
                 {
-                    _builder.AppendLine($"{indentor}var result = await (({operationContractSpec.Method.ContainingType.ToDisplayString()})instance).{operationContractSpec.Method.Name}({string.Join(", ", invocationParams)});");
+                    _builder.AppendLine($"{indentor}var result = await (({operationContractSpec.Method.ContainingType.ToDisplayString(s_typeDisplayFormat)})instance).{escapedMethodName}({string.Join(", ", invocationParams)});");
                 }
             }
             else
             {
                 if (operationContractSpec.Method.ReturnsVoid)
                 {
-                    _builder.AppendLine($"{indentor}(({operationContractSpec.Method.ContainingType.ToDisplayString()})instance).{operationContractSpec.Method.Name}({string.Join(", ", invocationParams)});");
+                    _builder.AppendLine($"{indentor}(({operationContractSpec.Method.ContainingType.ToDisplayString(s_typeDisplayFormat)})instance).{escapedMethodName}({string.Join(", ", invocationParams)});");
                 }
                 else
                 {
-                    _builder.AppendLine($"{indentor}var result = (({operationContractSpec.Method.ContainingType.ToDisplayString()})instance).{operationContractSpec.Method.Name}({string.Join(", ", invocationParams)});");
+                    _builder.AppendLine($"{indentor}var result = (({operationContractSpec.Method.ContainingType.ToDisplayString(s_typeDisplayFormat)})instance).{escapedMethodName}({string.Join(", ", invocationParams)});");
                 }
             }
 
@@ -209,7 +235,7 @@ public sealed partial class OperationInvokerGenerator
             _builder.AppendLine();
 
             _builder.Append($"{indentor}internal static void RegisterOperationInvoker() => ");
-            _builder.AppendLine($"CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker(\"{operationContractSpec.Method.ToDisplayString()}\", new {operationInvokerTypeName}());");
+            _builder.AppendLine($"CoreWCF.Dispatcher.DispatchOperationRuntimeHelpers.RegisterOperationInvoker(\"{operationContractSpec.Method.ToDisplayString(s_methodDisplayFormat)}\", new {operationInvokerTypeName}());");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
 
@@ -220,6 +246,14 @@ public sealed partial class OperationInvokerGenerator
         }
 
         private static string GetOperationInvokerTypeName(int index) => $"OperationInvoker{index}";
+
+        private static string EscapeIdentifier(string identifier)
+        {
+            return SyntaxFacts.GetKeywordKind(identifier) != SyntaxKind.None ||
+                   SyntaxFacts.GetContextualKeywordKind(identifier) != SyntaxKind.None
+                ? "@" + identifier
+                : identifier;
+        }
 
         private static bool FlowsIn(IParameterSymbol parameterSymbol)
         {
