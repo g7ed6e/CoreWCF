@@ -16,8 +16,8 @@ namespace CoreWCF.Extensions.Configuration.Tests
     /// </summary>
     public class EndToEndTests
     {
-        private const string ServiceTypeName = "CoreWCF.Extensions.Configuration.Tests.EchoService";
-        private const string ContractName = "CoreWCF.Extensions.Configuration.Tests.IEchoService";
+        private const string ServiceTypeName = "CoreWCF.Extensions.Configuration.Tests.EchoService, CoreWCF.Extensions.Configuration.Tests";
+        private const string ContractName = "CoreWCF.Extensions.Configuration.Tests.IEchoService, CoreWCF.Extensions.Configuration.Tests";
 
         public static TheoryData<string> HttpBindings => new TheoryData<string>
         {

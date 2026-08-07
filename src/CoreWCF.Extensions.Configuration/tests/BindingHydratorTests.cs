@@ -138,7 +138,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         public void ShortName_DoesNotResolve()
         {
             // Short names are rejected outright: CoreWCF ships homonym client and server bindings, so a short
-            // name cannot identify a type. See BindingTypeRegistry.
+            // name cannot identify a type. See ServiceModelTypeRegistry.
             IConfigurationSection section = Section(("Type", "NetTcpBinding"));
 
             Assert.Throws<BindingConfigurationException>(() => new BindingHydrator().CreateBinding(section));

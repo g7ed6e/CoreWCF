@@ -17,13 +17,16 @@ namespace CoreWCF.Extensions.Configuration
     /// <code>
     /// "ServiceModel": {
     ///   "Bindings": {
-    ///     "internal": { "Type": "NetTcpBinding", "Security": { "Mode": "None" } }
+    ///     "internal": {
+    ///       "Type": "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
+    ///       "Security": { "Mode": "None" }
+    ///     }
     ///   },
     ///   "Services": {
-    ///     "Contoso.EchoService": {
+    ///     "Contoso.EchoService, Contoso.Services": {
     ///       "Endpoints": [
     ///         {
-    ///           "Contract": "Contoso.IEchoService",
+    ///           "Contract": "Contoso.IEchoService, Contoso.Contracts",
     ///           "Binding": "internal",
     ///           "Address": "net.tcp://localhost:8089/echo"
     ///         }
@@ -38,17 +41,17 @@ namespace CoreWCF.Extensions.Configuration
     public class ServiceModelConfigurationReader
     {
         private readonly BindingHydrator _hydrator;
-        private readonly ServiceModelTypeResolver _typeResolver;
+        private readonly ServiceModelTypeRegistry _registry;
 
         public ServiceModelConfigurationReader()
-            : this(new BindingHydrator(), new ServiceModelTypeResolver())
+            : this(new BindingHydrator(), new ServiceModelTypeRegistry())
         {
         }
 
-        public ServiceModelConfigurationReader(BindingHydrator hydrator, ServiceModelTypeResolver typeResolver)
+        public ServiceModelConfigurationReader(BindingHydrator hydrator, ServiceModelTypeRegistry registry)
         {
             _hydrator = hydrator ?? throw new ArgumentNullException(nameof(hydrator));
-            _typeResolver = typeResolver ?? throw new ArgumentNullException(nameof(typeResolver));
+            _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         }
 
         /// <summary>
@@ -68,7 +71,7 @@ namespace CoreWCF.Extensions.Configuration
 
             foreach (IConfigurationSection service in serviceModelSection.GetSection("Services").GetChildren())
             {
-                Type serviceType = _typeResolver.Resolve(service.Key, service.Path);
+                Type serviceType = _registry.Resolve(service.Key, service.Path);
 
                 IConfigurationSection endpoints = service.GetSection("Endpoints");
                 if (!endpoints.Exists())
@@ -92,7 +95,7 @@ namespace CoreWCF.Extensions.Configuration
             IDictionary<string, Binding> namedBindings)
         {
             IConfigurationSection contractSection = endpoint.GetSection("Contract");
-            Type contract = _typeResolver.Resolve(contractSection.Value, contractSection.Path);
+            Type contract = _registry.Resolve(contractSection.Value, contractSection.Path);
 
             Binding binding = ResolveBinding(endpoint.GetSection("Binding"), namedBindings);
             Uri address = ReadUri(endpoint.GetSection("Address"), required: true);

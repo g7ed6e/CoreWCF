@@ -34,10 +34,10 @@ namespace CoreWCF.Extensions.Configuration
         private const BindingFlags PropertyFlags =
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy | BindingFlags.IgnoreCase;
 
-        private readonly BindingTypeRegistry _registry;
+        private readonly ServiceModelTypeRegistry _registry;
         private readonly string _discriminatorKey;
 
-        public ConfigurationObjectBinder(BindingTypeRegistry registry, string discriminatorKey)
+        public ConfigurationObjectBinder(ServiceModelTypeRegistry registry, string discriminatorKey)
         {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _discriminatorKey = discriminatorKey ?? throw new ArgumentNullException(nameof(discriminatorKey));
@@ -133,12 +133,19 @@ namespace CoreWCF.Extensions.Configuration
 
             if (typeName != null)
             {
-                concreteType = _registry.Resolve(declaredType, typeName);
+                concreteType = _registry.Resolve(declaredType, typeName, section.Path);
             }
             else if (declaredType.IsAbstract)
             {
                 throw new BindingConfigurationException(
                     $"A '{_discriminatorKey}' value is required to choose a concrete {declaredType.Name} " +
+                    $"(configuration path '{section.Path}').");
+            }
+
+            if (concreteType.IsAbstract)
+            {
+                throw new BindingConfigurationException(
+                    $"'{concreteType.FullName}' is abstract and cannot be created from configuration " +
                     $"(configuration path '{section.Path}').");
             }
 

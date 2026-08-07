@@ -26,7 +26,7 @@ namespace CoreWCF.Extensions.Configuration
     /// </remarks>
     public sealed class BindingHydrator
     {
-        private readonly BindingTypeRegistry _registry;
+        private readonly ServiceModelTypeRegistry _registry;
         private readonly string _discriminatorKey;
         private readonly ConfigurationObjectBinder _binder;
 
@@ -75,7 +75,7 @@ namespace CoreWCF.Extensions.Configuration
                     $"(configuration path '{section.Path}').");
             }
 
-            Type bindingType = _registry.ResolveBinding(typeName);
+            Type bindingType = _registry.ResolveBinding(typeName, section.Path);
             var binding = (Binding)Activator.CreateInstance(bindingType);
             _binder.Bind(binding, section);
             return binding;

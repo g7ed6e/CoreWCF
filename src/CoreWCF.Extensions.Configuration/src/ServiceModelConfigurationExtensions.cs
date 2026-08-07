@@ -39,8 +39,15 @@ namespace CoreWCF.Extensions.Configuration
             // A CoreWCF host registers the options infrastructure itself, but this extension should stand on its own.
             services.AddOptions();
 
-            services.TryAddSingleton<ServiceModelTypeResolver>();
-            services.TryAddSingleton<BindingHydrator>();
+            services.TryAddSingleton<ServiceModelTypeRegistry>();
+
+            // Built from the container's registry rather than its own, so names a host registers are visible to
+            // binding discriminators and not just to service and contract names.
+            services.TryAddSingleton(provider => new BindingHydrator(new BindingHydratorOptions
+            {
+                Registry = provider.GetRequiredService<ServiceModelTypeRegistry>(),
+            }));
+
             services.TryAddSingleton<ServiceModelConfigurationReader>();
 
             services.AddSingleton<IConfigureOptions<ServiceModelOptions>>(provider =>

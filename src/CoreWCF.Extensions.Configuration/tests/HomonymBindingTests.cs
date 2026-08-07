@@ -72,7 +72,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         [Fact]
         public void RegisteringBothUnderOneName_IsRejectedRatherThanLastWriterWins()
         {
-            var registry = new BindingTypeRegistry().Add("echo", typeof(Server.EchoBinding));
+            var registry = new ServiceModelTypeRegistry().Add("echo", typeof(Server.EchoBinding));
 
             BindingConfigurationException exception = Assert.Throws<BindingConfigurationException>(
                 () => registry.Add("echo", typeof(Client.EchoBinding)));
@@ -83,7 +83,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         [Fact]
         public void RegisteringBothUnderTheirFullNames_Coexists()
         {
-            var registry = new BindingTypeRegistry()
+            var registry = new ServiceModelTypeRegistry()
                 .Add(typeof(Server.EchoBinding))
                 .Add(typeof(Client.EchoBinding));
 

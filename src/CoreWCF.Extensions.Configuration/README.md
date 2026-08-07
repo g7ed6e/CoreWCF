@@ -13,10 +13,10 @@ Declares CoreWCF bindings, services and endpoints in `IConfiguration`, rather th
     }
   },
   "Services": {
-    "Contoso.EchoService": {
+    "Contoso.EchoService, Contoso.Services": {
       "Endpoints": [
         {
-          "Contract": "Contoso.IEchoService",
+          "Contract": "Contoso.IEchoService, Contoso.Contracts",
           "Binding": "internal",
           "Address": "net.tcp://localhost:8089/echo"
         }
@@ -34,9 +34,10 @@ services.AddServiceModelConfiguration(configuration.GetSection("ServiceModel"));
 An endpoint's `Binding` is either the name of an entry under `Bindings`, or an inline binding object when the
 binding is used once.
 
-## Naming a binding type
+## Naming a type
 
-**The `Type` discriminator is an assembly qualified name.** Short names such as `"NetTcpBinding"` are rejected.
+**Every type named in configuration is named by its assembly qualified name** — binding discriminators,
+service names and contract names alike. Short names such as `"NetTcpBinding"` are rejected.
 
 This is deliberate, and the reason is in this repository rather than in theory. CoreWCF ships client and server
 halves of the queue transports side by side, and they are deliberate homonyms:
@@ -57,6 +58,10 @@ by searching the assemblies already loaded gives an answer that depends on what 
 first — it works on the machine where it was written and fails elsewhere. An assembly qualified name loads its
 assembly rather than waiting for something else to.
 
+The same rule covers services and contracts, not only bindings, so a configuration file has one convention rather
+than one per kind of type. The determinism argument holds there too: a class library holding service
+implementations loads as lazily as a transport does.
+
 This also keeps the package honest about its dependencies: it references `CoreWCF.Primitives` and no transport.
 Eleven CoreWCF assemblies declare binding types, from HTTP and net.tcp through to MSMQ, Kafka and RabbitMQ, and
 referencing them to populate a registry would drag every transport into an application that wanted one. The
@@ -65,19 +70,16 @@ application brings the transports it uses; configuration names them.
 The cost is verbosity, and a host that would rather not repeat an assembly qualified name can register its own:
 
 ```csharp
-services.AddSingleton(new BindingHydrator(new BindingHydratorOptions
-{
-    Registry = new BindingTypeRegistry()
-        .Add("netTcp", typeof(CoreWCF.NetTcpBinding))
-        .Add("basicHttp", typeof(CoreWCF.BasicHttpBinding)),
-}));
+services.AddSingleton(new ServiceModelTypeRegistry()
+    .Add("netTcp", typeof(CoreWCF.NetTcpBinding))
+    .Add("echoService", typeof(Contoso.EchoService))
+    .Add("echoContract", typeof(Contoso.IEchoService)));
+
+services.AddServiceModelConfiguration(configuration.GetSection("ServiceModel"));
 ```
 
-Registering two types under one name is an error rather than a silent overwrite.
-
-Service and contract type names are resolved differently: a plain full name is looked up across the loaded
-assemblies, because they are the application's own types and its assembly is necessarily loaded. This asymmetry
-with binding names is deliberate but worth revisiting if it proves confusing.
+Registered before `AddServiceModelConfiguration`, that registry backs binding discriminators, service names and
+contract names alike. Registering two types under one name is an error rather than a silent overwrite.
 
 ## Custom bindings
 

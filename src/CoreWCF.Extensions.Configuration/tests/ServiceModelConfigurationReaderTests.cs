@@ -31,9 +31,9 @@ namespace CoreWCF.Extensions.Configuration.Tests
 
     public class ServiceModelConfigurationReaderTests
     {
-        private const string ServiceTypeName = "CoreWCF.Extensions.Configuration.Tests.EchoService";
-        private const string EchoContractName = "CoreWCF.Extensions.Configuration.Tests.IEchoService";
-        private const string InventoryContractName = "CoreWCF.Extensions.Configuration.Tests.IInventoryService";
+        private const string ServiceTypeName = "CoreWCF.Extensions.Configuration.Tests.EchoService, CoreWCF.Extensions.Configuration.Tests";
+        private const string EchoContractName = "CoreWCF.Extensions.Configuration.Tests.IEchoService, CoreWCF.Extensions.Configuration.Tests";
+        private const string InventoryContractName = "CoreWCF.Extensions.Configuration.Tests.IInventoryService, CoreWCF.Extensions.Configuration.Tests";
 
         private static IConfiguration Configure(Dictionary<string, string> data) =>
             new ConfigurationBuilder().AddInMemoryCollection(data).Build().GetSection("ServiceModel");
@@ -146,6 +146,26 @@ namespace CoreWCF.Extensions.Configuration.Tests
 
             Assert.Contains("intrenal", exception.Message);
             Assert.Contains("Binding", exception.Message);
+        }
+
+        [Fact]
+        public void BareFullNameContract_IsRejectedLikeABareBindingName()
+        {
+            // Services and contracts follow the same rule as bindings: a name carries its assembly. A class
+            // library holding service implementations loads as lazily as a transport does.
+            IConfiguration section = Configure(new Dictionary<string, string>
+            {
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
+                [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] =
+                    "CoreWCF.Extensions.Configuration.Tests.IEchoService",
+                [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "internal",
+                [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/echo",
+            });
+
+            BindingConfigurationException exception = Assert.Throws<BindingConfigurationException>(
+                () => new ServiceModelConfigurationReader().ReadEndpoints(section));
+
+            Assert.Contains("assembly qualified", exception.Message);
         }
 
         [Fact]

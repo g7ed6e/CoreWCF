@@ -66,7 +66,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
             // The registry is how a host avoids repeating an assembly qualified name in configuration.
             var options = new BindingHydratorOptions
             {
-                Registry = new BindingTypeRegistry().Add(typeof(AccessorSpyBinding)),
+                Registry = new ServiceModelTypeRegistry().Add(typeof(AccessorSpyBinding)),
             };
 
             var binding = (AccessorSpyBinding)new BindingHydrator(options).CreateBinding(SpySection());
