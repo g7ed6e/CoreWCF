@@ -117,7 +117,7 @@ A key that does not match a property fails, naming its configuration path, rathe
 that is a limitation of CoreWCF's options API rather than of this package: `ServiceConfigurationBuilder` exposes
 only `AddServiceEndpoint(Type, Binding, Uri, Uri)`, so there is nowhere to hand a full `EndpointAddress` even
 though `ServiceEndpoint.Address` is settable and `IServiceBuilder` has the `Action<ServiceEndpoint>` overload that
-would carry it. See the follow-up issue.
+would carry it. Tracked as [CoreWCF#1763](https://github.com/CoreWCF/CoreWCF/issues/1763).
 
 Address headers would remain out of scope regardless: an `AddressHeader`'s value is arbitrary
 DataContract-serialised XML, which a key/value configuration source cannot represent faithfully.
