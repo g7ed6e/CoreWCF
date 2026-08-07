@@ -110,3 +110,14 @@ later.
 ## Unknown keys are errors
 
 A key that does not match a property fails, naming its configuration path, rather than being silently ignored.
+
+## Endpoint addresses are a `Uri`
+
+`Address` and `ListenUri` are URIs. An endpoint identity and default addressing headers cannot be declared, and
+that is a limitation of CoreWCF's options API rather than of this package: `ServiceConfigurationBuilder` exposes
+only `AddServiceEndpoint(Type, Binding, Uri, Uri)`, so there is nowhere to hand a full `EndpointAddress` even
+though `ServiceEndpoint.Address` is settable and `IServiceBuilder` has the `Action<ServiceEndpoint>` overload that
+would carry it. See the follow-up issue.
+
+Address headers would remain out of scope regardless: an `AddressHeader`'s value is arbitrary
+DataContract-serialised XML, which a key/value configuration source cannot represent faithfully.
