@@ -4,60 +4,51 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using CoreWCF.Channels;
 
 namespace CoreWCF.Extensions.Configuration
 {
     /// <summary>
-    /// Maps the discriminator names used in configuration ("NetTcpBinding", "TextMessageEncodingBindingElement")
-    /// onto the CLR types they identify.
+    /// Resolves the type names used in configuration to name a <see cref="Binding"/> or a
+    /// <see cref="BindingElement"/>.
     /// </summary>
     /// <remarks>
-    /// Configuration is a flat, untyped key/value store, so a polymorphic value such as a <see cref="Binding"/> or a
-    /// <see cref="BindingElement"/> cannot be created without an explicit type discriminator. This registry is the
-    /// lookup behind that discriminator.
+    /// <para>
+    /// Configuration is a flat, untyped key/value store, so a polymorphic value such as a <see cref="Binding"/>
+    /// cannot be created without an explicit type discriminator. A discriminator is an
+    /// <see href="https://learn.microsoft.com/dotnet/api/system.type.assemblyqualifiedname">assembly qualified
+    /// name</see>: <c>"CoreWCF.NetTcpBinding, CoreWCF.NetTcp"</c>.
+    /// </para>
+    /// <para>
+    /// Short names are not accepted, and the reason is in this repository rather than in theory. CoreWCF ships
+    /// client and server halves of the queue transports side by side, and they are deliberate homonyms:
+    /// <c>CoreWCF.Channels.KafkaBinding</c> in <c>CoreWCF.Kafka</c> against
+    /// <c>CoreWCF.ServiceModel.Channels.KafkaBinding</c> in <c>CoreWCF.Kafka.Client</c>, and the same for
+    /// <c>RabbitMqBinding</c> and <c>RabbitMqTransportBindingElement</c>. Resolving <c>"KafkaBinding"</c> by short
+    /// name picks whichever assembly was scanned last. Namespaces already disambiguate the two - client types live
+    /// under <c>CoreWCF.ServiceModel.*</c>, mirroring <c>System.ServiceModel.*</c> - so the full name is the
+    /// smallest unambiguous key, and it stays unambiguous when the client half of this feature lands next to the
+    /// server half in the same configuration file.
+    /// </para>
+    /// <para>
+    /// Requiring the assembly as well is what makes resolution deterministic. Transports load lazily, so a name
+    /// resolved by searching the loaded assemblies would work or fail depending on what the application happened to
+    /// touch first. An assembly qualified name loads its assembly instead of waiting for something else to, so a
+    /// configuration that works on one machine works on all of them. This package therefore references
+    /// <c>CoreWCF.Primitives</c> alone, and no transport.
+    /// </para>
+    /// <para>
+    /// <see cref="Add"/> registers a type under a name of the host's choosing, for configuration that would rather
+    /// not repeat an assembly qualified name.
+    /// </para>
     /// </remarks>
     public sealed class BindingTypeRegistry
     {
         private readonly Dictionary<string, Type> _types = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
-        /// Creates a registry populated from the CoreWCF assemblies referenced by this package.
-        /// </summary>
-        public static BindingTypeRegistry CreateDefault()
-        {
-            var registry = new BindingTypeRegistry();
-            registry.AddFrom(typeof(Binding).Assembly);           // CoreWCF.Primitives
-            registry.AddFrom(typeof(BasicHttpBinding).Assembly);  // CoreWCF.Http
-            registry.AddFrom(typeof(NetTcpBinding).Assembly);     // CoreWCF.NetTcp
-            return registry;
-        }
-
-        /// <summary>
-        /// Registers every public, concrete, default-constructible <see cref="Binding"/> and
-        /// <see cref="BindingElement"/> declared by <paramref name="assembly"/>.
-        /// </summary>
-        public BindingTypeRegistry AddFrom(Assembly assembly)
-        {
-            if (assembly == null)
-            {
-                throw new ArgumentNullException(nameof(assembly));
-            }
-
-            foreach (Type type in assembly.GetExportedTypes())
-            {
-                if (IsRegisterable(type))
-                {
-                    Add(type);
-                }
-            }
-
-            return this;
-        }
-
-        /// <summary>
-        /// Registers a single type under its name and, for a "…Binding"/"…BindingElement" name, its short alias.
+        /// Registers <paramref name="type"/> under its full name, so configuration can name it without the
+        /// assembly.
         /// </summary>
         public BindingTypeRegistry Add(Type type)
         {
@@ -66,15 +57,32 @@ namespace CoreWCF.Extensions.Configuration
                 throw new ArgumentNullException(nameof(type));
             }
 
-            _types[type.Name] = type;
+            return Add(type.FullName, type);
+        }
 
-            // "NetTcpBinding" is also reachable as "NetTcp", which is how <bindings> names them in wcf.config.
-            string alias = StripSuffix(type.Name, "BindingElement") ?? StripSuffix(type.Name, "Binding");
-            if (alias != null && !_types.ContainsKey(alias))
+        /// <summary>
+        /// Registers <paramref name="type"/> under <paramref name="name"/>.
+        /// </summary>
+        public BindingTypeRegistry Add(string name, Type type)
+        {
+            if (string.IsNullOrEmpty(name))
             {
-                _types[alias] = type;
+                throw new ArgumentException("A name is required.", nameof(name));
             }
 
+            if (type == null)
+            {
+                throw new ArgumentNullException(nameof(type));
+            }
+
+            if (_types.TryGetValue(name, out Type existing) && existing != type)
+            {
+                throw new BindingConfigurationException(
+                    $"'{name}' is already registered for '{existing.AssemblyQualifiedName}' and cannot be " +
+                    $"re-registered for '{type.AssemblyQualifiedName}'.");
+            }
+
+            _types[name] = type;
             return this;
         }
 
@@ -95,14 +103,14 @@ namespace CoreWCF.Extensions.Configuration
 
             if (!_types.TryGetValue(name, out Type type))
             {
-                // Fall back to an assembly qualified name so types outside the registered assemblies stay reachable.
-                type = Type.GetType(name, throwOnError: false, ignoreCase: true);
+                type = Type.GetType(name, throwOnError: false, ignoreCase: false);
             }
 
             if (type == null)
             {
                 throw new BindingConfigurationException(
-                    $"'{name}' does not name a known {baseType.Name}. Known names: {KnownNames(baseType)}.");
+                    $"'{name}' did not resolve to a type. Name the {baseType.Name} with an assembly qualified " +
+                    $"name, for example \"CoreWCF.NetTcpBinding, CoreWCF.NetTcp\"{RegisteredNames(baseType)}.");
             }
 
             if (!baseType.IsAssignableFrom(type))
@@ -129,20 +137,17 @@ namespace CoreWCF.Extensions.Configuration
         /// </summary>
         public Type ResolveBindingElement(string name) => Resolve(typeof(BindingElement), name);
 
-        private string KnownNames(Type baseType) => string.Join(
-            ", ",
-            _types.Where(pair => baseType.IsAssignableFrom(pair.Value))
-                  .Select(pair => pair.Key)
-                  .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
+        private string RegisteredNames(Type baseType)
+        {
+            string[] names = _types
+                .Where(pair => baseType.IsAssignableFrom(pair.Value))
+                .Select(pair => pair.Key)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
-        private static bool IsRegisterable(Type type) =>
-            !type.IsAbstract &&
-            (typeof(Binding).IsAssignableFrom(type) || typeof(BindingElement).IsAssignableFrom(type)) &&
-            type.GetConstructor(Type.EmptyTypes) != null;
-
-        private static string StripSuffix(string name, string suffix) =>
-            name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.Ordinal)
-                ? name.Substring(0, name.Length - suffix.Length)
-                : null;
+            return names.Length == 0
+                ? string.Empty
+                : $", or one of the registered names: {string.Join(", ", names)}";
+        }
     }
 }

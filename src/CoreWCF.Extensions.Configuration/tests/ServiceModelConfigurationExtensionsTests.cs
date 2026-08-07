@@ -21,7 +21,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
 
         private static Dictionary<string, string> ValidConfiguration() => new Dictionary<string, string>
         {
-            ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+            ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
             [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
             [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "internal",
             [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/echo",

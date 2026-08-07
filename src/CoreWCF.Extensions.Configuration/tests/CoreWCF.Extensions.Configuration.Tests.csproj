@@ -29,6 +29,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\CoreWCF.Extensions.Configuration.csproj" />
+    <!-- The transports these tests exercise. The package itself references CoreWCF.Primitives alone;
+         an application brings the transports it uses, and names them by assembly in configuration. -->
+    <ProjectReference Include="$(SourceDir)CoreWCF.Http\src\CoreWCF.Http.csproj" />
+    <ProjectReference Include="$(SourceDir)CoreWCF.NetTcp\src\CoreWCF.NetTcp.csproj" />
   </ItemGroup>
 
 </Project>

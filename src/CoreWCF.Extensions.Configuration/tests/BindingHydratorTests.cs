@@ -27,7 +27,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         public void NetTcpBinding_HydratesScalarsAndNestedSecurity()
         {
             IConfigurationSection section = Section(
-                ("Type", "NetTcpBinding"),
+                ("Type", "CoreWCF.NetTcpBinding, CoreWCF.NetTcp"),
                 ("MaxReceivedMessageSize", "2097152"),
                 ("MaxBufferSize", "65536"),
                 ("ReceiveTimeout", "00:05:00"),
@@ -47,7 +47,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         public void BasicHttpBinding_HydratesEncodingAndReaderQuotas()
         {
             IConfigurationSection section = Section(
-                ("Type", "BasicHttpBinding"),
+                ("Type", "CoreWCF.BasicHttpBinding, CoreWCF.Http"),
                 ("TextEncoding", "utf-8"),
                 ("TransferMode", "Streamed"),
                 ("ReaderQuotas:MaxStringContentLength", "32768"),
@@ -62,21 +62,13 @@ namespace CoreWCF.Extensions.Configuration.Tests
         }
 
         [Fact]
-        public void ShortAlias_ResolvesBindingType()
-        {
-            IConfigurationSection section = Section(("Type", "NetTcp"));
-
-            Assert.IsType<NetTcpBinding>(new BindingHydrator().CreateBinding(section));
-        }
-
-        [Fact]
         public void BindingDefaults_SurviveAPartiallyConfiguredSubObject()
         {
             // Only Mode is configured; the rest of NetTcpSecurity must keep the defaults NetTcpBinding gave it.
             var expected = new NetTcpBinding();
 
             IConfigurationSection section = Section(
-                ("Type", "NetTcpBinding"),
+                ("Type", "CoreWCF.NetTcpBinding, CoreWCF.NetTcp"),
                 ("Security:Mode", "None"));
 
             var binding = (NetTcpBinding)new BindingHydrator().CreateBinding(section);
@@ -92,8 +84,8 @@ namespace CoreWCF.Extensions.Configuration.Tests
             IConfiguration configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string>
                 {
-                    ["Bindings:internal:Type"] = "NetTcpBinding",
-                    ["Bindings:public:Type"] = "BasicHttpBinding",
+                    ["Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
+                    ["Bindings:public:Type"] = "CoreWCF.BasicHttpBinding, CoreWCF.Http",
                     ["Bindings:public:Name"] = "explicitly-named",
                 })
                 .Build();
@@ -110,7 +102,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         public void UnknownKey_ReportsTheConfigurationPath()
         {
             IConfigurationSection section = Section(
-                ("Type", "NetTcpBinding"),
+                ("Type", "CoreWCF.NetTcpBinding, CoreWCF.NetTcp"),
                 ("MaxRecievedMessageSize", "1024"));
 
             BindingConfigurationException exception = Assert.Throws<BindingConfigurationException>(
@@ -132,14 +124,24 @@ namespace CoreWCF.Extensions.Configuration.Tests
         }
 
         [Fact]
-        public void UnknownBindingType_ListsTheKnownNames()
+        public void UnresolvableTypeName_PointsAtTheAssemblyQualifiedForm()
         {
-            IConfigurationSection section = Section(("Type", "NetTcpBindingg"));
+            IConfigurationSection section = Section(("Type", "CoreWCF.NetTcpBindingg, CoreWCF.NetTcp"));
 
             BindingConfigurationException exception = Assert.Throws<BindingConfigurationException>(
                 () => new BindingHydrator().CreateBinding(section));
 
-            Assert.Contains("NetTcpBinding", exception.Message);
+            Assert.Contains("assembly qualified", exception.Message);
+        }
+
+        [Fact]
+        public void ShortName_DoesNotResolve()
+        {
+            // Short names are rejected outright: CoreWCF ships homonym client and server bindings, so a short
+            // name cannot identify a type. See BindingTypeRegistry.
+            IConfigurationSection section = Section(("Type", "NetTcpBinding"));
+
+            Assert.Throws<BindingConfigurationException>(() => new BindingHydrator().CreateBinding(section));
         }
     }
 }

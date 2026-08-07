@@ -35,21 +35,21 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             var settings = new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:basicHttp:Type"] = "BasicHttpBinding",
+                ["ServiceModel:Bindings:basicHttp:Type"] = "CoreWCF.BasicHttpBinding, CoreWCF.Http",
                 ["ServiceModel:Bindings:basicHttp:MaxReceivedMessageSize"] = "1048576",
                 ["ServiceModel:Bindings:basicHttp:TextEncoding"] = "utf-8",
 
-                ["ServiceModel:Bindings:netHttp:Type"] = "NetHttpBinding",
+                ["ServiceModel:Bindings:netHttp:Type"] = "CoreWCF.NetHttpBinding, CoreWCF.Http",
 
-                ["ServiceModel:Bindings:wsHttp:Type"] = "WSHttpBinding",
+                ["ServiceModel:Bindings:wsHttp:Type"] = "CoreWCF.WSHttpBinding, CoreWCF.Http",
                 ["ServiceModel:Bindings:wsHttp:Security:Mode"] = "None",
 
                 // The case ConfigurationBinder cannot express: an ordered list of polymorphic binding elements.
-                ["ServiceModel:Bindings:custom:Type"] = "CustomBinding",
-                ["ServiceModel:Bindings:custom:Elements:0:Type"] = "TextMessageEncodingBindingElement",
+                ["ServiceModel:Bindings:custom:Type"] = "CoreWCF.Channels.CustomBinding, CoreWCF.Primitives",
+                ["ServiceModel:Bindings:custom:Elements:0:Type"] = "CoreWCF.Channels.TextMessageEncodingBindingElement, CoreWCF.Primitives",
                 ["ServiceModel:Bindings:custom:Elements:0:MessageVersion"] = "Soap11",
                 ["ServiceModel:Bindings:custom:Elements:0:WriteEncoding"] = "utf-8",
-                ["ServiceModel:Bindings:custom:Elements:1:Type"] = "HttpTransportBindingElement",
+                ["ServiceModel:Bindings:custom:Elements:1:Type"] = "CoreWCF.Channels.HttpTransportBindingElement, CoreWCF.Http",
                 ["ServiceModel:Bindings:custom:Elements:1:MaxReceivedMessageSize"] = "1048576",
             };
 
@@ -94,7 +94,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
 
             var settings = new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 ["ServiceModel:Bindings:internal:Security:Mode"] = "None",
                 ["ServiceModel:Bindings:internal:MaxReceivedMessageSize"] = "1048576",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = ContractName,

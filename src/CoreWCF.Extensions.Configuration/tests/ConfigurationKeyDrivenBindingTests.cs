@@ -10,51 +10,51 @@ using Xunit;
 namespace CoreWCF.Extensions.Configuration.Tests
 {
     /// <summary>
+    /// A binding that records reads and writes of a settable property, standing in for the binding properties
+    /// whose accessors are not pure: <c>ReaderQuotas</c> copies the incoming value over the encoder's own
+    /// instance, and <c>Security</c> rejects null and replaces the whole sub-object.
+    /// </summary>
+    public sealed class AccessorSpyBinding : Binding
+    {
+        private int _roundTripped;
+
+        public int Reads { get; private set; }
+
+        public int Writes { get; private set; }
+
+        public int Threshold { get; set; }
+
+        public int RoundTripped
+        {
+            get
+            {
+                Reads++;
+                return _roundTripped;
+            }
+
+            set
+            {
+                Writes++;
+                _roundTripped = value;
+            }
+        }
+
+        public override string Scheme => "spy";
+
+        public override BindingElementCollection CreateBindingElements() => new BindingElementCollection();
+    }
+
+    /// <summary>
     /// Pins the behaviour that makes hydration walk the configuration keys rather than hand the binding to
     /// ConfigurationBinder.
     /// </summary>
     public class ConfigurationKeyDrivenBindingTests
     {
-        /// <summary>
-        /// A binding that records reads and writes of a settable property, standing in for the binding properties
-        /// whose accessors are not pure: <c>ReaderQuotas</c> copies the incoming value over the encoder's own
-        /// instance, and <c>Security</c> rejects null and replaces the whole sub-object.
-        /// </summary>
-        public sealed class AccessorSpyBinding : Binding
-        {
-            private int _roundTripped;
-
-            public int Reads { get; private set; }
-
-            public int Writes { get; private set; }
-
-            public int Threshold { get; set; }
-
-            public int RoundTripped
-            {
-                get
-                {
-                    Reads++;
-                    return _roundTripped;
-                }
-
-                set
-                {
-                    Writes++;
-                    _roundTripped = value;
-                }
-            }
-
-            public override string Scheme => "spy";
-
-            public override BindingElementCollection CreateBindingElements() => new BindingElementCollection();
-        }
-
         private static IConfigurationSection SpySection() =>
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string>
                 {
-                    ["Binding:Type"] = "AccessorSpyBinding",
+                    ["Binding:Type"] = typeof(AccessorSpyBinding).FullName,
                     ["Binding:Threshold"] = "7",
                 })
                 .Build()
@@ -63,6 +63,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         [Fact]
         public void Hydration_LeavesUnconfiguredPropertiesUntouched()
         {
+            // The registry is how a host avoids repeating an assembly qualified name in configuration.
             var options = new BindingHydratorOptions
             {
                 Registry = new BindingTypeRegistry().Add(typeof(AccessorSpyBinding)),

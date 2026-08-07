@@ -43,9 +43,9 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfiguration section = Configure(new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 ["ServiceModel:Bindings:internal:MaxReceivedMessageSize"] = "2097152",
-                ["ServiceModel:Bindings:public:Type"] = "BasicHttpBinding",
+                ["ServiceModel:Bindings:public:Type"] = "CoreWCF.BasicHttpBinding, CoreWCF.Http",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "internal",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/echo",
@@ -77,7 +77,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfiguration section = Configure(new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:shared:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:shared:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "shared",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/a",
@@ -99,7 +99,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
             IConfiguration section = Configure(new Dictionary<string, string>
             {
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
-                [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding:Type"] = "NetTcpBinding",
+                [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding:MaxBufferSize"] = "16384",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/echo",
             });
@@ -116,7 +116,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfiguration section = Configure(new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "internal",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://contoso/echo",
@@ -135,7 +135,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfiguration section = Configure(new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "intrenal",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/echo",
@@ -153,7 +153,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfiguration section = Configure(new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = "Contoso.INotHere",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "internal",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = "net.tcp://localhost:8089/echo",
@@ -170,7 +170,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfiguration section = Configure(new Dictionary<string, string>
             {
-                ["ServiceModel:Bindings:internal:Type"] = "NetTcpBinding",
+                ["ServiceModel:Bindings:internal:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Contract"] = EchoContractName,
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Binding"] = "internal",
             });

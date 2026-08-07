@@ -24,12 +24,12 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfigurationSection section = Section(new Dictionary<string, string>
             {
-                ["Binding:Type"] = "CustomBinding",
-                ["Binding:Elements:0:Type"] = "TextMessageEncodingBindingElement",
+                ["Binding:Type"] = "CoreWCF.Channels.CustomBinding, CoreWCF.Primitives",
+                ["Binding:Elements:0:Type"] = "CoreWCF.Channels.TextMessageEncodingBindingElement, CoreWCF.Primitives",
                 ["Binding:Elements:0:MessageVersion"] = "Soap12WSAddressing10",
                 ["Binding:Elements:0:WriteEncoding"] = "utf-8",
                 ["Binding:Elements:0:MaxReadPoolSize"] = "128",
-                ["Binding:Elements:1:Type"] = "HttpTransportBindingElement",
+                ["Binding:Elements:1:Type"] = "CoreWCF.Channels.HttpTransportBindingElement, CoreWCF.Http",
                 ["Binding:Elements:1:MaxReceivedMessageSize"] = "1048576",
             });
 
@@ -50,27 +50,11 @@ namespace CoreWCF.Extensions.Configuration.Tests
         }
 
         [Fact]
-        public void ElementShortAlias_ResolvesElementType()
-        {
-            IConfigurationSection section = Section(new Dictionary<string, string>
-            {
-                ["Binding:Type"] = "CustomBinding",
-                ["Binding:Elements:0:Type"] = "TextMessageEncoding",
-                ["Binding:Elements:1:Type"] = "HttpTransport",
-            });
-
-            var binding = (CustomBinding)new BindingHydrator().CreateBinding(section);
-
-            Assert.IsType<TextMessageEncodingBindingElement>(binding.Elements[0]);
-            Assert.IsType<HttpTransportBindingElement>(binding.Elements[1]);
-        }
-
-        [Fact]
         public void ElementWithoutDiscriminator_IsReported()
         {
             IConfigurationSection section = Section(new Dictionary<string, string>
             {
-                ["Binding:Type"] = "CustomBinding",
+                ["Binding:Type"] = "CoreWCF.Channels.CustomBinding, CoreWCF.Primitives",
                 ["Binding:Elements:0:MaxReadPoolSize"] = "128",
             });
 
@@ -86,8 +70,8 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             IConfigurationSection section = Section(new Dictionary<string, string>
             {
-                ["Binding:Type"] = "CustomBinding",
-                ["Binding:Elements:0:Type"] = "NetTcpBinding",
+                ["Binding:Type"] = "CoreWCF.Channels.CustomBinding, CoreWCF.Primitives",
+                ["Binding:Elements:0:Type"] = "CoreWCF.NetTcpBinding, CoreWCF.NetTcp",
             });
 
             BindingConfigurationException exception = Assert.Throws<BindingConfigurationException>(
