@@ -789,6 +789,65 @@ namespace App
         }
 
         [Fact]
+        public void UriMember_IsWrittenFromItsSerializationComponents()
+        {
+            // Not ToString(). SerializationInfoString is the round-trippable form, and it is what
+            // normalises an authority-only Uri to carry a trailing slash - which the
+            // SanityUriAndOffset fixture records.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Endpoint
+    {
+        [DataMember] public System.Uri Address { get; set; }
+        [DataMember] public System.Uri[] Fallbacks { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Endpoint))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("GetComponents(global::System.UriComponents.SerializationInfoString, global::System.UriFormat.UriEscaped)", result.SingleSource);
+
+            // In a collection it is an XSD name in the Arrays namespace, like any other built-in.
+            Assert.Contains("writer.WriteStartElement(\"anyURI\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+        }
+
+        [Fact]
+        public void DateTimeOffsetMember_IsWrittenAsATwoMemberContract()
+        {
+            // DateTimeOffset is not a value on the wire at all: DataContractSerializer swaps in
+            // DateTimeOffsetAdapter, a contract with a DateTime and an OffsetMinutes member living
+            // in a namespace neither type mentions. The DateTime written is the UTC one, so the
+            // offset is recorded once rather than baked into both.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Stamped
+    {
+        [DataMember] public System.DateTimeOffset When { get; set; }
+        [DataMember] public System.DateTimeOffset? Maybe { get; set; }
+        [DataMember] public System.Collections.Generic.List<System.DateTimeOffset> Many { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Stamped))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteStartElement(\"DateTime\", \"http://schemas.datacontract.org/2004/07/System\");", result.SingleSource);
+            Assert.Contains("writer.WriteValue(value.UtcDateTime);", result.SingleSource);
+            Assert.Contains("writer.WriteValue((short)value.Offset.TotalMinutes);", result.SingleSource);
+
+            // An item is named after the contract and stays in the System namespace, unlike the
+            // built-in types which all go into the Arrays namespace.
+            Assert.Contains("writer.WriteStartElement(\"DateTimeOffset\", \"http://schemas.datacontract.org/2004/07/System\");", result.SingleSource);
+        }
+
+        [Fact]
         public void UnsignedLongMember_GoesThroughWriteRaw()
         {
             // XmlWriter has no WriteValue(ulong): ulong converts implicitly to float, double and

@@ -249,17 +249,21 @@ of many, and it caused exactly that misreading of `AllTypes` once already.
 
 `AllTypes` and `AllTypes2` between them still need:
 
-| Member | Capability |
-| --- | --- |
-| `XmlQualifiedName xmlQualifiedName` | QName values, whose member element takes a `q:` prefix of its own rather than reusing the contract's |
-| `Uri uri` | `Uri`, written via `GetComponents(SerializationInfoString, UriEscaped)` — note the trailing slash the fixture records |
-| `ValueType timeSpan`, `ValueType valType` | a member declared as `System.ValueType`: the boxed switch again, but over value types |
-| `Enum enumBase1` | a member declared as `System.Enum`: the boxed switch over enums |
-| `Array array1` | a member declared as `System.Array`, whose items declare the Arrays namespace as a *default* xmlns on each element rather than a prefix on the member |
-| `List<DateTimeOffset> lDTO`, `DateTimeOffset? nDTO` | `DateTimeOffset`, which is written as a two-member contract (`DateTime`, `OffsetMinutes`) in the `System` namespace |
+| Member | Capability | State |
+| --- | --- | --- |
+| `object z5` + `[KnownType]` | enums in an `object` member | done |
+| `MyEnum1[] enumArrayData` | collections of enums | done |
+| `Uri uri` | `Uri`, written via `GetComponents(SerializationInfoString, UriEscaped)` | done |
+| `List<DateTimeOffset> lDTO`, `DateTimeOffset? nDTO` | `DateTimeOffset` as a two-member contract in the `System` namespace | done |
+| `XmlQualifiedName xmlQualifiedName` | QName values, whose member element takes a `q:` prefix of its own rather than reusing the contract's | open |
+| `ValueType timeSpan`, `ValueType valType` | a member declared as `System.ValueType`: the boxed switch again, but over value types | open |
+| `Enum enumBase1` | a member declared as `System.Enum`: the boxed switch over enums | open |
+| `Array array1` | a member declared as `System.Array`, whose items declare the Arrays namespace as a *default* xmlns on each element rather than a prefix on the member | open |
 
-Done: enums in an `object` member, and collections of enums. Both were on the list; neither moved
-the case count, because these two contracts need all of it before either can pass.
+Four down, four to go; the case count has not moved, because these two contracts need all eight
+before either can pass. The four that are done are the ones worth having on their own - `Uri` and
+`DateTimeOffset` turn up in ordinary service contracts, where the other four are shapes only a
+deliberately pathological test type produces.
 
 The general lesson is about the report, not the contract: a coverage report that names one cause per
 contract will understate the work whenever the contract is wide. Collecting every reason rather than

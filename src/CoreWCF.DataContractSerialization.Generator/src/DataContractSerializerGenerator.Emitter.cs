@@ -38,6 +38,7 @@ public sealed partial class DataContractSerializerGenerator
         private const string CollectionNamespace = Parser.CollectionNamespace;
         private const string SerializationNamespace = "http://schemas.microsoft.com/2003/10/Serialization/";
         private const string SchemaNamespace = "http://www.w3.org/2001/XMLSchema";
+        private const string SystemContractNamespace = Parser.SystemContractNamespace;
         private const string ReferenceScope = "__ReferenceScope";
 
         private readonly StringBuilder _builder = new();
@@ -88,6 +89,7 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine();
             EmitCoversKnownTypes(indentor, context);
             EmitNilHelper(indentor);
+            EmitDateTimeOffsetHelper(indentor);
             EmitReferenceScope(indentor);
 
             if (context.Enums.Count > 0)
@@ -411,7 +413,7 @@ public sealed partial class DataContractSerializerGenerator
             bool canBeNull = !nullAlreadyExcluded
                 && (member.IsNullableValueType
                     || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract
-                        or MemberKind.Collection or MemberKind.Object);
+                        or MemberKind.Collection or MemberKind.Object or MemberKind.Uri);
 
             _builder.AppendLine($"{indentor}writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});");
 
@@ -745,6 +747,7 @@ public sealed partial class DataContractSerializerGenerator
                 yield return ("sbyte", MemberKind.SByte, "byte", SchemaNamespace);
                 yield return ("string", MemberKind.String, "string", SchemaNamespace);
                 yield return ("global::System.TimeSpan", MemberKind.TimeSpan, "duration", SerializationNamespace);
+                yield return ("global::System.Uri", MemberKind.Uri, "anyURI", SchemaNamespace);
                 yield return ("ushort", MemberKind.UInt16, "unsignedShort", SchemaNamespace);
                 yield return ("uint", MemberKind.UInt32, "unsignedInt", SchemaNamespace);
                 yield return ("ulong", MemberKind.UInt64, "unsignedLong", SchemaNamespace);
@@ -792,6 +795,13 @@ public sealed partial class DataContractSerializerGenerator
             MemberKind.TimeSpan => $"writer.WriteRaw({XmlConvert}.ToString({value}));",
             MemberKind.UInt64 => $"writer.WriteRaw({XmlConvert}.ToString({value}));",
             MemberKind.ByteArray => $"writer.WriteBase64({value}, 0, {value}.Length);",
+
+            // Not ToString(): SerializationInfoString is the round-trippable form, and it is what
+            // adds the trailing slash the fixtures record for an authority-only Uri.
+            MemberKind.Uri =>
+                $"writer.WriteString({value}.GetComponents(global::System.UriComponents.SerializationInfoString, global::System.UriFormat.UriEscaped));",
+
+            MemberKind.DateTimeOffset => $"WriteDateTimeOffset(writer, {value});",
             _ => $"writer.WriteValue({value});"
         };
 
@@ -809,7 +819,7 @@ public sealed partial class DataContractSerializerGenerator
             return member.Kind switch
             {
                 MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection
-                    or MemberKind.Object => $"{access} == null",
+                    or MemberKind.Object or MemberKind.Uri => $"{access} == null",
                 MemberKind.Boolean => $"!{access}",
                 _ => $"{access} == default"
             };
@@ -963,6 +973,33 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}// {enumSpec.FullyQualifiedName}");
             _builder.AppendLine($"{indentor}private static readonly long[] __EnumValues{index} = new long[] {{ {string.Join(", ", values)} }};");
             _builder.AppendLine($"{indentor}private static readonly string[] __EnumNames{index} = new string[] {{ {string.Join(", ", names)} }};");
+        }
+
+        /// <summary>
+        /// Emits the writer for <c>DateTimeOffset</c>, which is a contract rather than a primitive.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors DateTimeOffsetAdapter in dotnet/runtime, the struct contract
+        /// DataContractSerializer swaps in: two members named DateTime and OffsetMinutes, in the
+        /// System namespace, sorted the same way every contract's members are - which puts DateTime
+        /// first by ordinal name. The value written is <c>UtcDateTime</c>, not the local one, so the
+        /// element carries a Z and the offset is recorded separately rather than twice.
+        /// </remarks>
+        private void EmitDateTimeOffsetHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void WriteDateTimeOffset({DictionaryWriter} writer, global::System.DateTimeOffset value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteStartElement(\"DateTime\", {Literal(SystemContractNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteValue(value.UtcDateTime);");
+            _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}writer.WriteStartElement(\"OffsetMinutes\", {Literal(SystemContractNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteValue((short)value.Offset.TotalMinutes);");
+            _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
         }
 
         private void EmitNilHelper(Indentor indentor)

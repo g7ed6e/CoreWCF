@@ -261,6 +261,9 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
         public object Boolean { get; set; }
 
         [DataMember]
+        public object BoxedUri { get; set; }
+
+        [DataMember]
         public object ByteArray { get; set; }
 
         [DataMember]
@@ -323,6 +326,7 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
             {
                 BareObject = new object(),
                 Boolean = true,
+                BoxedUri = new Uri("http://corewcf.example"),
                 ByteArray = new byte[] { 7, 8 },
                 Char = 'a',
                 Contract = new SanityNestedNamespace { Inner = "nested" },
@@ -342,6 +346,62 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
                 UInt32 = 5u,
                 UInt64 = 6ul,
                 UnsignedByte = (byte)7
+            };
+        }
+    }
+
+    /// <summary>
+    /// <c>Uri</c> and <c>DateTimeOffset</c>, neither of which is what it looks like on the wire.
+    /// </summary>
+    /// <remarks>
+    /// A Uri is written from its serialization components rather than ToString, which normalises it.
+    /// A DateTimeOffset is not a value at all: DataContractSerializer swaps in an adapter contract
+    /// with a DateTime and an OffsetMinutes member, in a namespace neither type mentions. Both the
+    /// element shapes and the namespace come from this fixture rather than from memory.
+    /// </remarks>
+    [DataContract]
+    public class SanityUriAndOffset
+    {
+        [DataMember]
+        public Uri Absolute { get; set; }
+
+        [DataMember]
+        public Uri MissingUri { get; set; }
+
+        [DataMember]
+        public DateTimeOffset Offset { get; set; }
+
+        [DataMember]
+        public DateTimeOffset Utc { get; set; }
+
+        [DataMember]
+        public DateTimeOffset? NullableSet { get; set; }
+
+        [DataMember]
+        public DateTimeOffset? NullableMissing { get; set; }
+
+        [DataMember]
+        public List<DateTimeOffset> Offsets { get; set; }
+
+        [DataMember]
+        public Uri[] Uris { get; set; }
+
+        public static SanityUriAndOffset Populated()
+        {
+            return new SanityUriAndOffset
+            {
+                // No trailing slash here, so the fixture records whether one is added.
+                Absolute = new Uri("http://corewcf.example"),
+                MissingUri = null,
+                Offset = new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.FromMinutes(90)),
+                Utc = new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.Zero),
+                NullableSet = new DateTimeOffset(2021, 6, 7, 8, 9, 10, TimeSpan.FromMinutes(-300)),
+                NullableMissing = null,
+                Offsets = new List<DateTimeOffset>
+                {
+                    new DateTimeOffset(2022, 2, 3, 4, 5, 6, TimeSpan.Zero)
+                },
+                Uris = new Uri[] { new Uri("http://corewcf.example/a"), null }
             };
         }
     }

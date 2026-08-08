@@ -36,6 +36,16 @@ public sealed partial class DataContractSerializerGenerator
         /// <summary>The contract namespace arrays and lists of built-in types are written in.</summary>
         internal const string CollectionNamespace = "http://schemas.microsoft.com/2003/10/Serialization/Arrays";
 
+        /// <summary>
+        /// The contract namespace of the framework types the serializer models as contracts.
+        /// </summary>
+        /// <remarks>
+        /// <c>DateTimeOffset</c> is the one this generator writes: DataContractSerializer swaps in
+        /// DateTimeOffsetAdapter, a struct contract named DateTimeOffset in this namespace with a
+        /// DateTime and an OffsetMinutes member.
+        /// </remarks>
+        internal const string SystemContractNamespace = "http://schemas.datacontract.org/2004/07/System";
+
         internal static ContextSpec Parse(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
         {
             if (context.TargetSymbol is not INamedTypeSymbol contextType)
@@ -543,9 +553,17 @@ public sealed partial class DataContractSerializerGenerator
                     }
                 }
 
-                string? childNamespace = kind == MemberKind.Collection
-                    ? (itemNamespace != contractNamespace ? itemNamespace : null)
-                    : ChildNamespaceToDeclare(memberType, contractNamespace);
+                string? childNamespace = kind switch
+                {
+                    MemberKind.Collection => itemNamespace != contractNamespace ? itemNamespace : null,
+
+                    // Its two members live in the System namespace, so the member element declares
+                    // it exactly as it would for any other contract in a different namespace.
+                    MemberKind.DateTimeOffset =>
+                        SystemContractNamespace != contractNamespace ? SystemContractNamespace : null,
+
+                    _ => ChildNamespaceToDeclare(memberType, contractNamespace)
+                };
 
                 // A serializable field carries no attribute to read, and upstream gives it Order 0
                 // rather than the -1 an unspecified [DataMember] gets. Within one contract every
@@ -656,6 +674,16 @@ public sealed partial class DataContractSerializerGenerator
                 return MemberKind.Enum;
             }
 
+            // Like an enum, DateTimeOffset is a contract rather than a built-in, so its items are
+            // named after it and stay in the System namespace instead of the Arrays one.
+            if (kind == MemberKind.DateTimeOffset && !elementIsNullable)
+            {
+                itemName = "DateTimeOffset";
+                itemNamespace = SystemContractNamespace;
+                canBeNull = false;
+                return MemberKind.DateTimeOffset;
+            }
+
             if (kind == MemberKind.Unsupported || kind == MemberKind.Collection || kind == MemberKind.Contract
                 || kind == MemberKind.Enum || kind == MemberKind.Object || elementIsNullable)
             {
@@ -684,6 +712,7 @@ public sealed partial class DataContractSerializerGenerator
                 MemberKind.DateTime => "dateTime",
                 MemberKind.TimeSpan => "duration",
                 MemberKind.ByteArray => "base64Binary",
+                MemberKind.Uri => "anyURI",
                 _ => null
             };
 
@@ -692,7 +721,7 @@ public sealed partial class DataContractSerializerGenerator
                 return MemberKind.Unsupported;
             }
 
-            canBeNull = kind is MemberKind.String or MemberKind.ByteArray;
+            canBeNull = kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Uri;
             return kind;
         }
 
@@ -1095,6 +1124,10 @@ public sealed partial class DataContractSerializerGenerator
                     return MemberKind.Guid;
                 case "System.TimeSpan":
                     return MemberKind.TimeSpan;
+                case "System.Uri":
+                    return isNullableValueType ? MemberKind.Unsupported : MemberKind.Uri;
+                case "System.DateTimeOffset":
+                    return MemberKind.DateTimeOffset;
             }
 
             if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType)

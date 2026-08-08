@@ -167,6 +167,13 @@ public sealed partial class DataContractSerializerGenerator
         DateTime,
         TimeSpan,
         ByteArray,
+        Uri,
+
+        /// <summary>
+        /// <c>DateTimeOffset</c>, which is not a primitive at all: it is written as a two-member
+        /// contract in the System namespace, from the adapter DataContractSerializer swaps in.
+        /// </summary>
+        DateTimeOffset,
         Contract,
         Enum,
         Collection,
