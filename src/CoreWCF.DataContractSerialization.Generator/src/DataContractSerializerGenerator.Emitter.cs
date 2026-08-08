@@ -234,21 +234,27 @@ public sealed partial class DataContractSerializerGenerator
                 _builder.AppendLine($"{indentor}else");
                 _builder.AppendLine($"{indentor}{{");
                 indentor.Increment();
-                EmitMemberElement(indentor, member, access, name);
+
+                // Reaching this branch already proves the member is not at its default, and for the
+                // nullable kinds "default" is exactly "null" - so re-testing for null here would be
+                // dead code.
+                EmitMemberElement(indentor, member, access, name, nullAlreadyExcluded: true);
+
                 indentor.Decrement();
                 _builder.AppendLine($"{indentor}}}");
             }
             else
             {
-                EmitMemberElement(indentor, member, access, name);
+                EmitMemberElement(indentor, member, access, name, nullAlreadyExcluded: false);
             }
         }
 
-        private void EmitMemberElement(Indentor indentor, MemberSpec member, string access, string name)
+        private void EmitMemberElement(Indentor indentor, MemberSpec member, string access, string name, bool nullAlreadyExcluded)
         {
-            bool canBeNull = member.IsNullableValueType
-                || member.Kind == MemberKind.String
-                || member.Kind == MemberKind.ByteArray;
+            bool canBeNull = !nullAlreadyExcluded
+                && (member.IsNullableValueType
+                    || member.Kind == MemberKind.String
+                    || member.Kind == MemberKind.ByteArray);
 
             if (canBeNull)
             {

@@ -19,5 +19,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\src\CoreWCF.DataContractSerialization.Generator.csproj" />
+    <!-- Referenced so generated code can be compiled against the real types it emits calls to,
+         rather than against a stand-in that could drift from them. -->
+    <ProjectReference Include="$(SourceDir)CoreWCF.DataContractSerialization\src\CoreWCF.DataContractSerialization.csproj" />
   </ItemGroup>
 </Project>
