@@ -560,6 +560,8 @@ public sealed partial class DataContractSerializerGenerator
                 MemberKind valueKind = MemberKind.Unsupported;
                 bool keyCanBeNull = false;
                 bool valueCanBeNull = false;
+                string? keyClrType = null;
+                string? valueClrType = null;
 
                 if (kind == MemberKind.Collection)
                 {
@@ -590,6 +592,8 @@ public sealed partial class DataContractSerializerGenerator
                     if (TryClassifyDictionary(keyType!, valueType!, out itemName, out keyKind, out valueKind, out keyCanBeNull, out valueCanBeNull))
                     {
                         itemNamespace = CollectionNamespace;
+                        keyClrType = keyType!.ToDisplayString(FullyQualifiedFormat);
+                        valueClrType = valueType!.ToDisplayString(FullyQualifiedFormat);
                     }
                     else
                     {
@@ -644,6 +648,8 @@ public sealed partial class DataContractSerializerGenerator
                     NestedElementCanBeNull = nestedElementCanBeNull,
                     KeyKind = keyKind,
                     ValueKind = valueKind,
+                    KeyClrType = keyClrType,
+                    ValueClrType = valueClrType,
                     KeyCanBeNull = keyCanBeNull,
                     ValueCanBeNull = valueCanBeNull,
                     ElementCanBeNull = elementCanBeNull,

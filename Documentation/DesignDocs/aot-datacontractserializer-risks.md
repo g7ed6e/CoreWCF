@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **74 of 80** corpus cases byte-match; the six that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **29 of 79** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer: flat contracts of built-in members, nested contracts, collections, and inheritance. See "The read algorithm" below for what stays unreadable and why. |
+| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **76 of 81** corpus cases byte-match; the five that skip are all deliberate exclusions. |
+| **M4 — `ReadObject`** | In progress. **37 of 81** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer: flat contracts of built-in members, nested contracts, collections, inheritance, enums and dictionaries. See "The read algorithm" below for what stays unreadable and why. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -209,12 +209,35 @@ MemberNamespaces[i + baseMemberCount] = Namespace;
 So **an inherited member is matched against the namespace of the contract that declares it**, not
 the derived contract's. The generator flattens the same way, in `FlattenedMembers`.
 
+### An enum comes back through its name table, never through Enum.Parse
+
+`EnumDataContract.ReadEnumValue` matches the wire text against the contract's own names, ordinally,
+and throws on one it does not recognise. Two details are load-bearing:
+
+- **A flags enum is a space-separated list, and an empty one is legal** - it is how a zero value is
+  written when no member names it. A non-flags enum is a single name, and there the empty string is
+  an error rather than zero.
+- **A name must match in full.** Comparing only the first *count* characters would accept a
+  truncated name and return the wrong member, so the generated lookup tests the length first.
+
+An unrecognised name always throws rather than falling back to a numeric parse. `Enum.Parse` would
+accept names the contract never declared and numbers the contract never wrote, which is precisely
+the silent-wrong-graph failure this project exists to prevent. The ulong-backed cast reinterprets
+bits rather than converting them, matching what the writer does and what upstream does through
+`Enum.ToObject` on the unsigned value.
+
 ### An empty collection and a null one are different documents
 
 An empty element yields an empty collection; only `i:nil` yields null. Getting that backwards is
 invisible until something round-trips, which is what the read oracle is for: it reads with the
 generated serializer and writes back with the **reflection** one, so any difference in the recovered
 graph shows up as a byte difference against the recorded fixture.
+
+The same three-way distinction applies to a dictionary, and one populated `Dictionary<string,
+string>` reaches none of it - which is why `SanityDictionaries` was added rather than trusting the
+code. Its fixture pins an empty map, a missing one, an entry whose `Value` carries `i:nil`, a
+base64 value and a non-string key, all in one document. A branch no fixture exercises is a branch
+that is not verified, however carefully it was written.
 
 ### What stays unreadable, and why
 
@@ -227,7 +250,7 @@ terminates at run time on a nil or empty element rather than statically.
 | Polymorphic members, boxed members | Resolving an `i:type` back to a type is a different problem from announcing one. A member that may hold more than its declared contract would otherwise read as its declared type and silently lose the derived members. |
 | A contract that names a descendant in its `[KnownType]` closure | Same failure, at the root, where there is no member to carry the decline. Merely *having* a descendant is not enough: one this contract never names is one the reflection reader would refuse outright, so declining for it would cost coverage and buy no safety. |
 | `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
-| Enums, dictionaries, `DateTimeOffset`, `QName`, `DateOnly`/`TimeOnly` | One inverse each; not yet written. |
+| `DateTimeOffset`, `QName`, `DateOnly`/`TimeOnly` | One inverse each; not yet written. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 
 ---

@@ -338,6 +338,71 @@ namespace App
         }
 
         [Fact]
+        public void EnumMember_ReadsItsNameTableBack()
+        {
+            // A flags enum and a plain one are parsed differently - a flags list is space separated
+            // and may be empty, a single name may not be - so the table lookup is told which it is.
+            // Mirrors EnumDataContract.ReadEnumValue.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    public enum Plain { None = 0, One = 1 }
+
+    [System.Flags]
+    public enum Marks : ulong { None = 0, Alpha = 1, Beta = 2 }
+
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public Plain Single { get; set; }
+        [DataMember] public Marks Several { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            Assert.Contains(", false, \"global::App.Plain\")", result.SingleSource);
+            Assert.Contains(", true, \"global::App.Marks\")", result.SingleSource);
+
+            // A ulong-backed enum reinterprets its bits rather than converting them, the same way
+            // round the writer does, or every value past long.MaxValue comes back a different
+            // number.
+            Assert.Contains("(global::App.Marks)unchecked((ulong)ReadEnum(", result.SingleSource);
+            Assert.Contains("(global::App.Plain)ReadEnum(", result.SingleSource);
+        }
+
+        [Fact]
+        public void DictionaryMember_ReadsEachEntryByKeyAndValue()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.Collections.Generic.Dictionary<int, string> Map { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // The part names and their namespace come from the same spec the writer proved against
+            // a fixture, so the reader looks for exactly what was written.
+            Assert.Contains("reader.LocalName == \"Key\"", result.SingleSource);
+            Assert.Contains("reader.LocalName == \"Value\"", result.SingleSource);
+            Assert.Contains(
+                "reader.NamespaceURI == \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\"",
+                result.SingleSource);
+            Assert.Contains("__pairs.Add(__key, __value);", result.SingleSource);
+        }
+
+        [Fact]
         public void BaseContractNamingItsDerivedTypes_IsNotRead()
         {
             // A document can legitimately carry an i:type here, so reading it through the base's

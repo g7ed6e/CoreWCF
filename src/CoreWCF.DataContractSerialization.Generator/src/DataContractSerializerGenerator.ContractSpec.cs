@@ -158,6 +158,16 @@ public sealed partial class DataContractSerializerGenerator
         /// <summary>For <see cref="MemberKind.Dictionary"/>, how the value is written.</summary>
         public MemberKind ValueKind { get; init; }
 
+        /// <summary>For <see cref="MemberKind.Dictionary"/>, the CLR type of the key.</summary>
+        /// <remarks>
+        /// Writing a dictionary never needs this - foreach infers both type arguments - but reading
+        /// has to name the pair it is building before it has either half of one.
+        /// </remarks>
+        public string? KeyClrType { get; init; }
+
+        /// <summary>For <see cref="MemberKind.Dictionary"/>, the CLR type of the value.</summary>
+        public string? ValueClrType { get; init; }
+
         /// <summary>For <see cref="MemberKind.Dictionary"/>, whether the key may be null.</summary>
         public bool KeyCanBeNull { get; init; }
 

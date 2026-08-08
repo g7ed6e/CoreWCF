@@ -102,6 +102,7 @@ public sealed partial class DataContractSerializerGenerator
             if (context.Enums.Count > 0)
             {
                 EmitEnumHelper(indentor);
+                EmitEnumReadHelper(indentor);
 
                 foreach (EnumSpec enumSpec in context.Enums)
                 {
@@ -1176,6 +1177,113 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits the parser that turns an enum's wire text back into its numeric value.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors EnumDataContract.ReadEnumValue. A flags enum is a space-separated list whose
+        /// members are OR-ed together, and an empty one is legal - it is how the zero value is
+        /// written when no member names it. A non-flags enum is a single name, and the empty string
+        /// is an error rather than zero. An unrecognised name always throws: it is a document this
+        /// contract cannot represent, and guessing would put a value in the graph that was never
+        /// written.
+        /// </remarks>
+        private void EmitEnumReadHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static long ReadEnum(string text, long[] values, string[] names, bool isFlags, string typeName)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (isFlags)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}long flags = 0;");
+            _builder.AppendLine($"{indentor}int start = 0;");
+            _builder.AppendLine($"{indentor}for (int i = 0; i <= text.Length; i++)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (i == text.Length || text[i] == ' ')");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (i > start)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}flags |= ReadEnumName(text, start, i - start, values, names, typeName);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}start = i + 1;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return flags;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (text.Length == 0)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(\"Invalid enum value '' cannot be deserialized into type \" + typeName + \".\");");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return ReadEnumName(text, 0, text.Length, values, names, typeName);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static long ReadEnumName(string text, int index, int count, long[] values, string[] names, string typeName)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}for (int i = 0; i < names.Length; i++)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            // The length test is not an optimisation. CompareOrdinal over count characters would
+            // match a name that merely starts with the text, so without it Read would accept a
+            // truncated name and return the wrong member.
+            _builder.AppendLine($"{indentor}if (names[i].Length == count && string.CompareOrdinal(text, index, names[i], 0, count) == 0)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return values[i];");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Invalid enum value '\" + text.Substring(index, count) + \"' cannot be deserialized into type \" + typeName + \".\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// The expression that turns an element's text back into one enum value, or null when the
+        /// enum was never collected.
+        /// </summary>
+        /// <remarks>
+        /// The cast mirrors the one the writer uses: a ulong-backed enum reinterprets its bits
+        /// rather than converting them, or every value past long.MaxValue comes back as a different
+        /// number. Upstream does the same thing through Enum.ToObject on the unsigned value.
+        /// </remarks>
+        private string? ReadEnumExpression(string? enumFullyQualifiedName, string text)
+        {
+            if (enumFullyQualifiedName is null || !_enumSpecs.TryGetValue(enumFullyQualifiedName, out EnumSpec spec))
+            {
+                return null;
+            }
+
+            int index = _enumIndexes[enumFullyQualifiedName];
+            string isFlags = spec.IsFlags ? "true" : "false";
+            string read = $"ReadEnum({text}, __EnumValues{index}, __EnumNames{index}, {isFlags}, {Literal(enumFullyQualifiedName)})";
+
+            return spec.IsUnsignedLong
+                ? $"({enumFullyQualifiedName})unchecked((ulong){read})"
+                : $"({enumFullyQualifiedName}){read}";
+        }
+
+        /// <summary>
         /// Emits the per-call object-identity table behind <c>IsReference</c>.
         /// </summary>
         /// <remarks>
@@ -1559,6 +1667,16 @@ public sealed partial class DataContractSerializerGenerator
                 return;
             }
 
+            if (member.Kind == MemberKind.Dictionary)
+            {
+                EmitDictionaryRead(indentor, member, target);
+                return;
+            }
+
+            string readValue = member.Kind == MemberKind.Enum
+                ? ReadEnumExpression(member.NestedContractFullyQualifiedName, "__text")!
+                : ReadValueExpression(member.Kind, "__text")!;
+
             _builder.AppendLine($"{indentor}string __text = ReadText(reader);");
             _builder.AppendLine($"{indentor}if (__text == null)");
             _builder.AppendLine($"{indentor}{{");
@@ -1569,7 +1687,7 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}else");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
-            _builder.AppendLine($"{indentor}{target} = {ReadValueExpression(member.Kind, "__text")};");
+            _builder.AppendLine($"{indentor}{target} = {readValue};");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
         }
@@ -1676,8 +1794,12 @@ public sealed partial class DataContractSerializerGenerator
             }
             else
             {
+                string readItem = member.ElementKind == MemberKind.Enum
+                    ? ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__itemText")!
+                    : ReadValueExpression(member.ElementKind, "__itemText")!;
+
                 _builder.AppendLine($"{indentor}string __itemText = ReadText(reader);");
-                _builder.AppendLine($"{indentor}__items.Add(__itemText == null ? default : {ReadValueExpression(member.ElementKind, "__itemText")});");
+                _builder.AppendLine($"{indentor}__items.Add(__itemText == null ? default : {readItem});");
             }
 
             _builder.AppendLine($"{indentor}reader.MoveToContent();");
@@ -1689,6 +1811,144 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}}}");
             _builder.AppendLine();
             _builder.AppendLine($"{indentor}{target} = __items{(member.CollectionIsArray ? ".ToArray()" : string.Empty)};");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the read of a dictionary member: one pair per entry element.
+        /// </summary>
+        /// <remarks>
+        /// The mirror of EmitDictionaryMember. The entry name and both part names come from the
+        /// spec rather than from here, so a name the writer proved against a fixture is the one the
+        /// reader looks for. Like every other collection, an empty element yields an empty
+        /// dictionary and only i:nil yields null.
+        /// </remarks>
+        private void EmitDictionaryRead(Indentor indentor, MemberSpec member, string target)
+        {
+            string keyType = member.KeyClrType!;
+            string valueType = member.ValueClrType!;
+            string dictionaryType = $"global::System.Collections.Generic.Dictionary<{keyType}, {valueType}>";
+            string entryNamespace = member.ItemNamespace!;
+
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}{target} = default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{dictionaryType} __pairs = new {dictionaryType}();");
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{keyType} __key = default;");
+            _builder.AppendLine($"{indentor}{valueType} __value = default;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            // An entry is an ordinary two-member contract on the wire, so it is matched the way
+            // every other one is: forward only, each part at most once.
+            _builder.AppendLine($"{indentor}int __part = -1;");
+            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+
+            EmitDictionaryPartRead(indentor, "if", 0, "Key", entryNamespace, member.KeyKind, "__key", "__keyText");
+            EmitDictionaryPartRead(indentor, "else if", 1, "Value", entryNamespace, member.ValueKind, "__value", "__valueText");
+
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}__pairs.Add(__key, __value);");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}{target} = __pairs;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        private void EmitDictionaryPartRead(
+            Indentor indentor,
+            string keyword,
+            int index,
+            string name,
+            string entryNamespace,
+            MemberKind kind,
+            string target,
+            string textName)
+        {
+            _builder.AppendLine($"{indentor}{keyword} (__part < {index}");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}&& reader.LocalName == {Literal(name)}");
+            _builder.AppendLine($"{indentor}&& reader.NamespaceURI == {Literal(entryNamespace)})");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+
+            if (kind == MemberKind.ByteArray)
+            {
+                _builder.AppendLine($"{indentor}if (IsNil(reader))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}reader.Skip();");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}{target} = reader.ReadElementContentAsBase64();");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+            else
+            {
+                _builder.AppendLine($"{indentor}string {textName} = ReadText(reader);");
+                _builder.AppendLine($"{indentor}{target} = {textName} == null ? default : {ReadValueExpression(kind, textName)};");
+            }
+
+            _builder.AppendLine($"{indentor}__part = {index};");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
         }
@@ -1858,11 +2118,35 @@ public sealed partial class DataContractSerializerGenerator
             if (member.Kind == MemberKind.Collection)
             {
                 return member.ElementClrType is not null
-                    && ReadValueExpression(member.ElementKind, "__text") is not null;
+                    && (member.ElementKind == MemberKind.Enum
+                        ? ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__text") is not null
+                        : IsBuiltInReadable(member.ElementKind));
             }
 
-            return ReadValueExpression(member.Kind, "__text") is not null;
+            if (member.Kind == MemberKind.Dictionary)
+            {
+                return member.KeyClrType is not null
+                    && member.ValueClrType is not null
+                    && member.ItemNamespace is not null
+                    && IsBuiltInReadable(member.KeyKind)
+                    && IsBuiltInReadable(member.ValueKind);
+            }
+
+            if (member.Kind == MemberKind.Enum)
+            {
+                return ReadEnumExpression(member.NestedContractFullyQualifiedName, "__text") is not null;
+            }
+
+            return IsBuiltInReadable(member.Kind);
         }
+
+        /// <summary>Whether an element whose content is a built-in value can be read back.</summary>
+        /// <remarks>
+        /// A byte array has no text expression because it is not read from text at all - it comes
+        /// back through ReadElementContentAsBase64 - so it has to be admitted separately.
+        /// </remarks>
+        private static bool IsBuiltInReadable(MemberKind kind) =>
+            kind == MemberKind.ByteArray || ReadValueExpression(kind, "__text") is not null;
 
         /// <summary>
         /// The expression that turns an element's text back into a member's value, or null when the

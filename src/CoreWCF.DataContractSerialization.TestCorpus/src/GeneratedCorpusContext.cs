@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using CoreWCF.DataContractSerialization.TestCorpus.Sanity;
@@ -41,6 +41,8 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
     [DataContractSerializable(typeof(SanityDateAndTimeOnly))]
 #endif
     [DataContractSerializable(typeof(SanityEnums))]
+    [DataContractSerializable(typeof(SanityEnumCollections))]
+    [DataContractSerializable(typeof(SanityDictionaries))]
     [DataContractSerializable(typeof(SanityNullable))]
     [DataContractSerializable(typeof(SanityDerived))]
     [DataContractSerializable(typeof(SanityKnownTypeHolder))]

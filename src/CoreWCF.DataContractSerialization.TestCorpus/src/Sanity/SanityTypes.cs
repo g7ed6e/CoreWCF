@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -590,6 +590,71 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
                 Plain = SanityEnum.Second,
                 Flags = SanityFlagsEnum.Alpha | SanityFlagsEnum.Gamma,
                 Renamed = SanityRenamedEnum.One
+            };
+        }
+    }
+
+    /// <summary>
+    /// Dictionary shapes one populated string map does not reach.
+    /// </summary>
+    /// <remarks>
+    /// An empty map, a missing one, and a map holding a null value are three different documents -
+    /// an empty element, an i:nil element, and an entry whose Value carries i:nil - and telling
+    /// them apart is exactly what a round-trip tests and a write-only fixture does not.
+    /// </remarks>
+    [DataContract]
+    public class SanityDictionaries
+    {
+        [DataMember]
+        public Dictionary<int, DateTime> IntToDateTime { get; set; }
+
+        [DataMember]
+        public Dictionary<string, byte[]> StringToBytes { get; set; }
+
+        [DataMember]
+        public Dictionary<string, string> EmptyMap { get; set; }
+
+        [DataMember]
+        public Dictionary<string, string> MissingMap { get; set; }
+
+        public static SanityDictionaries Populated()
+        {
+            Dictionary<int, DateTime> byNumber = new Dictionary<int, DateTime>();
+            byNumber.Add(7, new DateTime(2021, 3, 4, 5, 6, 7, DateTimeKind.Utc));
+
+            Dictionary<string, byte[]> byName = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            byName.Add("payload", new byte[] { 9, 8, 7 });
+            byName.Add("absent", null);
+
+            return new SanityDictionaries
+            {
+                IntToDateTime = byNumber,
+                StringToBytes = byName,
+                EmptyMap = new Dictionary<string, string>(StringComparer.Ordinal),
+                MissingMap = null
+            };
+        }
+    }
+
+    /// <summary>
+    /// Enums inside a collection, whose items are named after the enum's own contract rather than
+    /// after an XSD type, and so sit in its namespace instead of the Arrays one.
+    /// </summary>
+    [DataContract]
+    public class SanityEnumCollections
+    {
+        [DataMember]
+        public SanityEnum[] Plain { get; set; }
+
+        [DataMember]
+        public List<SanityFlagsEnum> Flags { get; set; }
+
+        public static SanityEnumCollections Populated()
+        {
+            return new SanityEnumCollections
+            {
+                Plain = new SanityEnum[] { SanityEnum.First, SanityEnum.None },
+                Flags = new List<SanityFlagsEnum> { SanityFlagsEnum.Beta | SanityFlagsEnum.Gamma }
             };
         }
     }
