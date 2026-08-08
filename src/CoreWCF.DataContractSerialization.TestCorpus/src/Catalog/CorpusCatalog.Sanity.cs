@@ -59,6 +59,9 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
             builder.Add<SanityDictionaries>("populated", SanityDictionaries.Populated)
                    .WithTags("collections", "nil");
 
+            builder.Add<SanityUntypedCollections>("populated", SanityUntypedCollections.Populated)
+                   .WithTags("collections", "polymorphism", "nil");
+
             builder.Add<SanityQualifiedNames>("populated", SanityQualifiedNames.Populated)
                    .WithTags("primitives", "namespaces");
 

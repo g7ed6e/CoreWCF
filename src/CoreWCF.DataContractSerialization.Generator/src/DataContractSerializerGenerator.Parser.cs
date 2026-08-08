@@ -556,6 +556,9 @@ public sealed partial class DataContractSerializerGenerator
                 bool nestedElementCanBeNull = false;
                 string? elementClrType = null;
                 bool collectionIsArray = false;
+                bool collectionIsArrayList = false;
+                string? nestedElementClrType = null;
+                bool nestedCollectionIsArray = false;
                 MemberKind keyKind = MemberKind.Unsupported;
                 MemberKind valueKind = MemberKind.Unsupported;
                 bool keyCanBeNull = false;
@@ -583,6 +586,19 @@ public sealed partial class DataContractSerializerGenerator
                     {
                         elementClrType = elementType.ToDisplayString(FullyQualifiedFormat);
                         collectionIsArray = UnwrapNullable(memberType) is IArrayTypeSymbol;
+
+                        if (CollectionElementTypeOf(elementType) is ITypeSymbol innerElementType)
+                        {
+                            nestedElementClrType = innerElementType.ToDisplayString(FullyQualifiedFormat);
+                            nestedCollectionIsArray = elementType is IArrayTypeSymbol;
+                        }
+                    }
+                    else if (IsArrayList(UnwrapNullable(memberType)))
+                    {
+                        // An ArrayList holds anything, so its items are objects and the container is
+                        // itself rather than a List<T>.
+                        elementClrType = "object";
+                        collectionIsArrayList = true;
                     }
                 }
                 else if (kind == MemberKind.Dictionary)
@@ -637,6 +653,9 @@ public sealed partial class DataContractSerializerGenerator
                     ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
                     ElementClrType = elementClrType,
                     CollectionIsArray = collectionIsArray,
+                    CollectionIsArrayList = collectionIsArrayList,
+                    NestedElementClrType = nestedElementClrType,
+                    NestedCollectionIsArray = nestedCollectionIsArray,
                     IsSettable = member switch
                     {
                         IPropertySymbol property => property.SetMethod is { DeclaredAccessibility: Accessibility.Public },

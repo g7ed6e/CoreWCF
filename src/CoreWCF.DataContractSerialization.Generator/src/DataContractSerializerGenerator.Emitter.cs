@@ -2177,34 +2177,14 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>Emits the read of an <c>object[]</c>, whose items each announce their own type.</summary>
-        private void EmitUntypedArrayRead(Indentor indentor, string target)
-        {
-            _builder.AppendLine($"{indentor}global::System.Collections.Generic.List<object> __items = new global::System.Collections.Generic.List<object>();");
-            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
-            _builder.AppendLine($"{indentor}{{");
-            indentor.Increment();
-            _builder.AppendLine($"{indentor}reader.Read();");
-            indentor.Decrement();
-            _builder.AppendLine($"{indentor}}}");
-            _builder.AppendLine($"{indentor}else");
-            _builder.AppendLine($"{indentor}{{");
-            indentor.Increment();
-            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
-            _builder.AppendLine($"{indentor}reader.MoveToContent();");
-            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
-            _builder.AppendLine($"{indentor}{{");
-            indentor.Increment();
-            _builder.AppendLine($"{indentor}__items.Add(ReadAnyType(reader));");
-            _builder.AppendLine($"{indentor}reader.MoveToContent();");
-            indentor.Decrement();
-            _builder.AppendLine($"{indentor}}}");
-            _builder.AppendLine();
-            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
-            indentor.Decrement();
-            _builder.AppendLine($"{indentor}}}");
-            _builder.AppendLine();
-            _builder.AppendLine($"{indentor}{target} = __items.ToArray();");
-        }
+        private void EmitUntypedArrayRead(Indentor indentor, string target) =>
+            EmitSequenceRead(
+                indentor,
+                ContainerTypeOf("object", isArrayList: false),
+                "__items",
+                FinishOf(isArray: true),
+                target,
+                (inner, container) => _builder.AppendLine($"{inner}{container}.Add(ReadAnyType(reader));"));
 
         /// <summary>
         /// Emits the read of one element whose content is a value, into an lvalue that already
@@ -2463,9 +2443,6 @@ public sealed partial class DataContractSerializerGenerator
         /// </remarks>
         private void EmitCollectionRead(Indentor indentor, MemberSpec member, string target)
         {
-            string elementType = member.ElementClrType!;
-            string listType = $"global::System.Collections.Generic.List<{elementType}>";
-
             _builder.AppendLine($"{indentor}if (IsNil(reader))");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
@@ -2476,7 +2453,89 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}else");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
-            _builder.AppendLine($"{indentor}{listType} __items = new {listType}();");
+
+            EmitSequenceRead(
+                indentor,
+                ContainerTypeOf(member.ElementClrType!, member.CollectionIsArrayList),
+                "__items",
+                FinishOf(member.CollectionIsArray),
+                target,
+                (inner, container) =>
+                {
+                    _builder.AppendLine($"{inner}{member.ElementClrType} __item = default;");
+
+                    if (member.ElementKind == MemberKind.Collection)
+                    {
+                        EmitJaggedItemRead(inner, member, "__item");
+                    }
+                    else
+                    {
+                        EmitValueRead(inner, member.ElementKind, member.ElementEnumFullyQualifiedName, "__item", "__itemText");
+                    }
+
+                    _builder.AppendLine($"{inner}{container}.Add(__item);");
+                });
+
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the read of one item of a jagged collection, which is a collection in its own right.
+        /// </summary>
+        /// <remarks>
+        /// The ArrayOf element is the inner collection's element - there is no second wrapper - so
+        /// this is the same loop one level down, over the innermost items. A null inner collection
+        /// is i:nil like any other missing reference, which is what the writer records for one.
+        /// </remarks>
+        private void EmitJaggedItemRead(Indentor indentor, MemberSpec member, string target)
+        {
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}{target} = default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+
+            EmitSequenceRead(
+                indentor,
+                ContainerTypeOf(member.NestedElementClrType!, isArrayList: false),
+                "__inner",
+                FinishOf(member.NestedCollectionIsArray),
+                target,
+                (deepest, container) =>
+                {
+                    _builder.AppendLine($"{deepest}{member.NestedElementClrType} __innerItem = default;");
+                    EmitValueRead(deepest, member.NestedElementKind, null, "__innerItem", "__innerText");
+                    _builder.AppendLine($"{deepest}{container}.Add(__innerItem);");
+                });
+
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the loop that fills a container from the children of an element, then assigns it.
+        /// </summary>
+        /// <remarks>
+        /// Serves every sequence on the read side - a typed collection, an untyped object[], and
+        /// each half of a jagged one - because they differ only in what a container is and how an
+        /// item is read. An empty element yields an empty container and only i:nil yields null,
+        /// which is the caller's business rather than this loop's.
+        /// </remarks>
+        private void EmitSequenceRead(
+            Indentor indentor,
+            string containerType,
+            string container,
+            string finish,
+            string target,
+            Action<Indentor, string> emitItem)
+        {
+            _builder.AppendLine($"{indentor}{containerType} {container} = new {containerType}();");
             _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
@@ -2491,10 +2550,7 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
-
-            _builder.AppendLine($"{indentor}{elementType} __item = default;");
-            EmitValueRead(indentor, member.ElementKind, member.ElementEnumFullyQualifiedName, "__item", "__itemText");
-            _builder.AppendLine($"{indentor}__items.Add(__item);");
+            emitItem(indentor, container);
             _builder.AppendLine($"{indentor}reader.MoveToContent();");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
@@ -2503,10 +2559,15 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
             _builder.AppendLine();
-            _builder.AppendLine($"{indentor}{target} = __items{(member.CollectionIsArray ? ".ToArray()" : string.Empty)};");
-            indentor.Decrement();
-            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}{target} = {container}{finish};");
         }
+
+        private static string ContainerTypeOf(string elementType, bool isArrayList) =>
+            isArrayList
+                ? "global::System.Collections.ArrayList"
+                : $"global::System.Collections.Generic.List<{elementType}>";
+
+        private static string FinishOf(bool isArray) => isArray ? ".ToArray()" : string.Empty;
 
         /// <summary>
         /// Emits the read of a dictionary member: one pair per entry element.
@@ -2803,10 +2864,20 @@ public sealed partial class DataContractSerializerGenerator
 
             if (member.Kind == MemberKind.Collection)
             {
-                return member.ElementClrType is not null
-                    && (member.ElementKind == MemberKind.Enum
-                        ? ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__text") is not null
-                        : IsBuiltInReadable(member.ElementKind));
+                if (member.ElementClrType is null)
+                {
+                    return false;
+                }
+
+                if (member.ElementKind == MemberKind.Collection)
+                {
+                    return member.NestedElementClrType is not null
+                        && IsBuiltInReadable(member.NestedElementKind);
+                }
+
+                return member.ElementKind == MemberKind.Enum
+                    ? ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__text") is not null
+                    : IsBuiltInReadable(member.ElementKind);
             }
 
             if (member.Kind == MemberKind.Dictionary)

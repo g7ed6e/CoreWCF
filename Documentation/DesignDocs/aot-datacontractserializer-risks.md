@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **80 of 85** corpus cases byte-match; the five that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **49 of 85** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Everything except object identity and two collection containers: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset`, `XmlQualifiedName`, `DateOnly`, `TimeOnly`, `i:type` polymorphism and boxed members. See "The read algorithm" below for what stays unreadable and why. |
+| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **81 of 86** corpus cases byte-match; the five that skip are all deliberate exclusions. |
+| **M4 — `ReadObject`** | In progress. **51 of 86** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Every capability except object identity. What still skips is `IsReference`, plus two contracts with no accessible parameterless constructor - which generated code cannot work around at all. See "The read algorithm" below. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -360,6 +360,37 @@ so an unmatched name there never reaches the XSD table.
 announces no `i:type` at all - each item carries its own. Reading it is the same loop the untyped
 item reader serves for an `ArrayList`.
 
+### One sequence loop, three containers
+
+Reading a sequence is the same loop every time - fill a container from the children of an element,
+then assign it - and the containers are what differ:
+
+| | Container | Finish |
+| --- | --- | --- |
+| `T[]` | `List<T>` | `.ToArray()` |
+| `List<T>` | `List<T>` | assign as is |
+| `ArrayList` | `ArrayList` | assign as is |
+
+`ArrayList` is the one a read cannot infer from the items, which is why the spec records it
+explicitly: writing one needs nothing but `foreach`, so the write side never had to know.
+
+A jagged collection is that loop nested. The `ArrayOf` element is the inner collection's own element
+- there is no second wrapper - so an item read is the same loop one level down, over the innermost
+items. A null inner row is `i:nil` like any other missing reference, which is what makes
+`{ {1,2}, {}, null }` three different documents rather than two.
+
+#### A contract with no parameterless constructor can be written and never read
+
+`DataContractSerializer` allocates without running a constructor. Generated code has no such option,
+so `ArrayContainer` - which declares `ArrayContainer(bool)` and thereby suppresses the implicit
+parameterless one - and `PrivateCstor` are written byte-exactly and never read. This is not a gap to
+close later; it is the one place where the generated path is strictly less capable than reflection,
+and it fails by declining rather than by producing a wrong graph.
+
+That is also why `SanityUntypedCollections` exists: the upstream cases covering these containers are
+exactly the two that cannot be read, so without it the container code would have shipped with no
+fixture exercising it.
+
 ### What stays unreadable, and why
 
 A contract is readable only if every contract it reaches is - it is a graph question, computed with
@@ -368,8 +399,6 @@ terminates at run time on a nil or empty element rather than statically.
 
 | Not read | Reason |
 | --- | --- |
-| Jagged collections | `int[][]` reads its items through the same path as any other collection, and that path has no case for an item that is itself a collection. |
-| `ArrayList` members | Its *items* read - they are untyped values like any other - but the container does not: the collection reader accumulates into a `List<T>` and assigns it or its `ToArray()`, and an `ArrayList` is neither. |
 | `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 

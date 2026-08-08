@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
 using System.Xml;
@@ -678,6 +679,52 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
                 Named = new XmlQualifiedName("WCF", "http://corewcf.example/schema"),
                 EmptyName = XmlQualifiedName.Empty,
                 MissingName = null
+            };
+        }
+    }
+
+    /// <summary>
+    /// The two collections whose container a read cannot infer from its items.
+    /// </summary>
+    /// <remarks>
+    /// Everything else on the read side accumulates into a <c>List&lt;T&gt;</c> and either assigns
+    /// it or calls ToArray on it. An <c>ArrayList</c> is neither, and a jagged array is two of them
+    /// nested. The upstream cases that cover these - ArrayContainer and Array3 - do not reach the
+    /// read side: ArrayContainer declares a constructor taking a bool and so has no parameterless
+    /// one, and Array3 has no null inner row.
+    /// </remarks>
+    [DataContract]
+    public class SanityUntypedCollections
+    {
+        [DataMember]
+        public ArrayList Mixed { get; set; }
+
+        [DataMember]
+        public ArrayList EmptyList { get; set; }
+
+        [DataMember]
+        public ArrayList MissingList { get; set; }
+
+        [DataMember]
+        public int[][] Jagged { get; set; }
+
+        public static SanityUntypedCollections Populated()
+        {
+            ArrayList mixed = new ArrayList();
+            mixed.Add("text");
+            mixed.Add(42);
+            mixed.Add(new Guid("2f9e4c1a-0000-4000-8000-000000000004"));
+            mixed.Add(null);
+
+            return new SanityUntypedCollections
+            {
+                Mixed = mixed,
+                EmptyList = new ArrayList(),
+                MissingList = null,
+
+                // A populated row, an empty one and a missing one: three different documents, and
+                // only the middle two are reachable from an array that is never null.
+                Jagged = new int[][] { new int[] { 1, 2 }, new int[0], null }
             };
         }
     }

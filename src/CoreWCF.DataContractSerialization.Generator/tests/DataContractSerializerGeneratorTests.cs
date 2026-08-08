@@ -577,6 +577,62 @@ namespace App
         }
 
         [Fact]
+        public void JaggedArrayMember_ReadsEachInnerArrayAsACollectionOfItsOwn()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public int[][] Rows { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // The ArrayOf element is the inner collection's own element, so the read is the same
+            // loop one level down rather than a special case.
+            Assert.Contains("__inner", result.SingleSource);
+            Assert.Contains("__item = __inner.ToArray();", result.SingleSource);
+            Assert.Contains("__items.Add(__item);", result.SingleSource);
+            Assert.Contains("value.Rows = __items.ToArray();", result.SingleSource);
+        }
+
+        [Fact]
+        public void ArrayListMember_ReadsIntoAnArrayListRatherThanAList()
+        {
+            // The one container a read cannot infer from its items: everything else accumulates into
+            // a List<T> and either assigns it or calls ToArray on it, and an ArrayList is neither.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.Collections.ArrayList Items { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            Assert.Contains(
+                "global::System.Collections.ArrayList __items = new global::System.Collections.ArrayList();",
+                result.SingleSource);
+
+            // Its items are untyped, so each announces its own type on the way out and resolves it
+            // on the way back in.
+            Assert.Contains("__item = ReadAnyType(reader);", result.SingleSource);
+            Assert.Contains("value.Items = __items;", result.SingleSource);
+        }
+
+        [Fact]
         public void ObjectMember_ReadsEachXsdNameBackToItsPrimitive()
         {
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"

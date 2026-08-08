@@ -149,6 +149,20 @@ public sealed partial class DataContractSerializerGenerator
         /// <summary>Whether the collection is an array rather than a List, which decides how a read ends.</summary>
         public bool CollectionIsArray { get; init; }
 
+        /// <summary>Whether the collection is an <c>ArrayList</c>, which is its own container.</summary>
+        /// <remarks>
+        /// Writing one needs nothing but foreach. Reading has to build it, and an ArrayList is
+        /// neither a List&lt;T&gt; nor an array, so it is the one container the read cannot infer
+        /// from <see cref="CollectionIsArray"/> alone.
+        /// </remarks>
+        public bool CollectionIsArrayList { get; init; }
+
+        /// <summary>For a jagged collection, the CLR type of one innermost item.</summary>
+        public string? NestedElementClrType { get; init; }
+
+        /// <summary>For a jagged collection, whether each inner collection is an array.</summary>
+        public bool NestedCollectionIsArray { get; init; }
+
         /// <summary>Whether generated code can assign this member, as opposed to only read it.</summary>
         public bool IsSettable { get; init; }
 
