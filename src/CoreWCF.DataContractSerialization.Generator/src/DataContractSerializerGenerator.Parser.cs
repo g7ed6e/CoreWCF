@@ -554,6 +554,8 @@ public sealed partial class DataContractSerializerGenerator
                 string? nestedItemName = null;
                 MemberKind nestedElementKind = MemberKind.Unsupported;
                 bool nestedElementCanBeNull = false;
+                string? elementClrType = null;
+                bool collectionIsArray = false;
                 MemberKind keyKind = MemberKind.Unsupported;
                 MemberKind valueKind = MemberKind.Unsupported;
                 bool keyCanBeNull = false;
@@ -573,6 +575,12 @@ public sealed partial class DataContractSerializerGenerator
                     else if (elementEnum is not null)
                     {
                         enums.Add(elementEnum);
+                    }
+
+                    if (CollectionElementTypeOf(UnwrapNullable(memberType)) is ITypeSymbol elementType)
+                    {
+                        elementClrType = elementType.ToDisplayString(FullyQualifiedFormat);
+                        collectionIsArray = UnwrapNullable(memberType) is IArrayTypeSymbol;
                     }
                 }
                 else if (kind == MemberKind.Dictionary)
@@ -623,6 +631,8 @@ public sealed partial class DataContractSerializerGenerator
                     ItemName = itemName,
                     ItemNamespace = itemNamespace,
                     ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
+                    ElementClrType = elementClrType,
+                    CollectionIsArray = collectionIsArray,
                     IsSettable = member switch
                     {
                         IPropertySymbol property => property.SetMethod is { DeclaredAccessibility: Accessibility.Public },

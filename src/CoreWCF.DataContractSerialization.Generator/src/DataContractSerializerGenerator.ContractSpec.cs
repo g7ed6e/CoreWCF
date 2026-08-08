@@ -137,6 +137,18 @@ public sealed partial class DataContractSerializerGenerator
         /// <summary>For a jagged collection, whether an innermost item may be null.</summary>
         public bool NestedElementCanBeNull { get; init; }
 
+        /// <summary>
+        /// For <see cref="MemberKind.Collection"/>, the CLR type of one item.
+        /// </summary>
+        /// <remarks>
+        /// Writing a collection never needs this - foreach infers it - but reading has to name the
+        /// list it accumulates into before it has anything to put in it.
+        /// </remarks>
+        public string? ElementClrType { get; init; }
+
+        /// <summary>Whether the collection is an array rather than a List, which decides how a read ends.</summary>
+        public bool CollectionIsArray { get; init; }
+
         /// <summary>Whether generated code can assign this member, as opposed to only read it.</summary>
         public bool IsSettable { get; init; }
 

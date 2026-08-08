@@ -48,6 +48,7 @@ public sealed partial class DataContractSerializerGenerator
         private readonly Dictionary<string, ContractSpec> _contractSpecs = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _enumIndexes = new(StringComparer.Ordinal);
         private readonly Dictionary<string, EnumSpec> _enumSpecs = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, bool> _readable = new(StringComparer.Ordinal);
 
         internal SourceText Emit(ContextSpec context)
         {
@@ -1544,6 +1545,18 @@ public sealed partial class DataContractSerializerGenerator
                 return;
             }
 
+            if (member.Kind == MemberKind.Contract)
+            {
+                EmitNestedContractRead(indentor, member, target);
+                return;
+            }
+
+            if (member.Kind == MemberKind.Collection)
+            {
+                EmitCollectionRead(indentor, member, target);
+                return;
+            }
+
             _builder.AppendLine($"{indentor}string __text = ReadText(reader);");
             _builder.AppendLine($"{indentor}if (__text == null)");
             _builder.AppendLine($"{indentor}{{");
@@ -1560,6 +1573,125 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits the read of a member that is itself a contract, written inline by the writer.
+        /// </summary>
+        /// <remarks>
+        /// The wire format has no second wrapping element, so the member element <em>is</em> the
+        /// nested contract's element: open it, hand the reader to that contract's content reader,
+        /// close it. The mirror of what the content writer does.
+        /// </remarks>
+        private void EmitNestedContractRead(Indentor indentor, MemberSpec member, string target)
+        {
+            ContractSpec nested = _contractSpecs[member.NestedContractFullyQualifiedName!];
+            string typeName = nested.FullyQualifiedName;
+
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}{target} = default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{typeName} __nested = new {typeName}();");
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}{ContentReaderName(nested)}(reader, {(nested.IsValueType ? "ref " : string.Empty)}__nested);");
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}{target} = __nested;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the read of a collection member, accumulating into a list before assigning.
+        /// </summary>
+        /// <remarks>
+        /// An empty collection and a null one are different documents and stay different here: an
+        /// empty element yields an empty collection, and only i:nil yields null. Getting that
+        /// backwards is invisible until something round-trips.
+        /// </remarks>
+        private void EmitCollectionRead(Indentor indentor, MemberSpec member, string target)
+        {
+            string elementType = member.ElementClrType!;
+            string listType = $"global::System.Collections.Generic.List<{elementType}>";
+
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}{target} = default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{listType} __items = new {listType}();");
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+
+            if (member.ElementKind == MemberKind.ByteArray)
+            {
+                _builder.AppendLine($"{indentor}if (IsNil(reader))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}reader.Skip();");
+                _builder.AppendLine($"{indentor}__items.Add(default);");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}__items.Add(reader.ReadElementContentAsBase64());");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+            else
+            {
+                _builder.AppendLine($"{indentor}string __itemText = ReadText(reader);");
+                _builder.AppendLine($"{indentor}__items.Add(__itemText == null ? default : {ReadValueExpression(member.ElementKind, "__itemText")});");
+            }
+
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}{target} = __items{(member.CollectionIsArray ? ".ToArray()" : string.Empty)};");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
         /// Whether this contract can be read back, which is a narrower question than whether it can
         /// be written.
         /// </summary>
@@ -1570,25 +1702,64 @@ public sealed partial class DataContractSerializerGenerator
         /// to silently produce a graph that is not the one recorded - so they stay unreadable until
         /// they are implemented rather than being approximated.
         /// </remarks>
-        private static bool IsReadable(ContractSpec contract)
+        private bool IsReadable(ContractSpec contract)
         {
-            if (!contract.IsSupported
-                || !contract.HasParameterlessConstructor
-                || contract.BaseContractFullyQualifiedName is not null
-                || contract.IsReference)
+            if (_readable.TryGetValue(contract.FullyQualifiedName, out bool known))
+            {
+                return known;
+            }
+
+            // A contract that reaches itself - a linked list is the ordinary case - is assumed
+            // readable while its own answer is being computed. The recursion terminates at run time
+            // on a nil or empty element, so the optimistic answer is the right one.
+            _readable[contract.FullyQualifiedName] = true;
+
+            bool readable = contract.IsSupported
+                && contract.HasParameterlessConstructor
+                && contract.BaseContractFullyQualifiedName is null
+                && !contract.IsReference;
+
+            if (readable)
+            {
+                foreach (MemberSpec member in contract.Members)
+                {
+                    if (!member.IsSettable || !IsMemberReadable(member))
+                    {
+                        readable = false;
+                        break;
+                    }
+                }
+            }
+
+            _readable[contract.FullyQualifiedName] = readable;
+            return readable;
+        }
+
+        /// <summary>Whether one member can be read back.</summary>
+        private bool IsMemberReadable(MemberSpec member)
+        {
+            // Polymorphism is a write-side capability for now: resolving an i:type back to a type is
+            // a different problem from announcing one, so a member that may hold more than its
+            // declared contract is not readable.
+            if (member.Candidates.Count > 0 || member.EnumCandidates.Count > 0)
             {
                 return false;
             }
 
-            foreach (MemberSpec member in contract.Members)
+            if (member.Kind == MemberKind.Contract)
             {
-                if (!member.IsSettable || ReadValueExpression(member.Kind, "__text") is null)
-                {
-                    return false;
-                }
+                return member.NestedContractFullyQualifiedName is string nested
+                    && _contractSpecs.TryGetValue(nested, out ContractSpec nestedSpec)
+                    && IsReadable(nestedSpec);
             }
 
-            return true;
+            if (member.Kind == MemberKind.Collection)
+            {
+                return member.ElementClrType is not null
+                    && ReadValueExpression(member.ElementKind, "__text") is not null;
+            }
+
+            return ReadValueExpression(member.Kind, "__text") is not null;
         }
 
         /// <summary>
