@@ -182,6 +182,58 @@ namespace App
         }
 
         [Fact]
+        public void CollectionMember_WritesItemsInTheCollectionNamespace()
+        {
+            // Items are named after their XSD type, not the CLR type - and several differ. The
+            // names are pinned by the SanityPrimitiveArrays fixture, produced by the real
+            // serializer.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class WithCollections
+    {
+        [DataMember] public int[] Numbers { get; set; }
+        [DataMember] public System.Collections.Generic.List<string> Words { get; set; }
+        [DataMember] public sbyte[] Signed { get; set; }
+    }
+
+    [DataContractSerializable(typeof(WithCollections))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteXmlnsAttribute(null, \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("writer.WriteStartElement(\"int\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("writer.WriteStartElement(\"string\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            // sbyte is "byte" on the wire, and byte is "unsignedByte" - the opposite of the guess.
+            Assert.Contains("writer.WriteStartElement(\"byte\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+        }
+
+        [Fact]
+        public void ByteArrayMember_IsAPrimitiveNotACollection()
+        {
+            // byte[] is written as base64 in the containing contract's namespace, with no child
+            // namespace declaration and no per-item elements.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class WithBytes
+    {
+        [DataMember] public byte[] Payload { get; set; }
+    }
+
+    [DataContractSerializable(typeof(WithBytes))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteBase64(value.Payload, 0, value.Payload.Length);", result.SingleSource);
+            Assert.DoesNotContain("Serialization/Arrays", result.SingleSource);
+        }
+
+        [Fact]
         public void UnsupportedMemberType_LeavesTheContractToReflection()
         {
             // Falling back is a correct outcome, so this is a recorded comment rather than a
@@ -190,7 +242,7 @@ namespace App
     [DataContract]
     public class HasCollection
     {
-        [DataMember] public System.Collections.Generic.List<int> Values { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<string, string> Values { get; set; }
     }
 
     [DataContractSerializable(typeof(HasCollection))]
@@ -338,7 +390,7 @@ namespace App
     [DataContract]
     public class Problem
     {
-        [DataMember] public System.Collections.Generic.List<int> Values { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<string, string> Values { get; set; }
     }
 
     [DataContractSerializable(typeof(Container))]

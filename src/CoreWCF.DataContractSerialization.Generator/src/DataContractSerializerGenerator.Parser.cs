@@ -30,6 +30,9 @@ public sealed partial class DataContractSerializerGenerator
         /// <summary>The namespace a contract gets when it does not name one itself.</summary>
         private const string DefaultNamespacePrefix = "http://schemas.datacontract.org/2004/07/";
 
+        /// <summary>The contract namespace arrays and lists of built-in types are written in.</summary>
+        internal const string CollectionNamespace = "http://schemas.microsoft.com/2003/10/Serialization/Arrays";
+
         internal static ContextSpec Parse(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
         {
             if (context.TargetSymbol is not INamedTypeSymbol contextType)
@@ -317,6 +320,24 @@ public sealed partial class DataContractSerializerGenerator
                     enums.Add(nestedContract);
                 }
 
+                MemberKind elementKind = MemberKind.Unsupported;
+                string? itemName = null;
+                bool elementCanBeNull = false;
+
+                if (kind == MemberKind.Collection)
+                {
+                    elementKind = ClassifyCollectionElement(memberType, out itemName, out elementCanBeNull);
+                    if (elementKind == MemberKind.Unsupported)
+                    {
+                        unsupportedReason ??= "member '" + member.Name + "' has unsupported collection element type in '" +
+                                              memberType.ToDisplayString() + "'";
+                    }
+                }
+
+                string? childNamespace = kind == MemberKind.Collection
+                    ? (CollectionNamespace != contractNamespace ? CollectionNamespace : null)
+                    : ChildNamespaceToDeclare(memberType, contractNamespace);
+
                 members.Add(new MemberSpec(
                     Name: GetNamedArgument(dataMember, "Name") ?? member.Name,
                     Order: GetNamedArgumentInt32(dataMember, "Order") ?? -1,
@@ -326,7 +347,12 @@ public sealed partial class DataContractSerializerGenerator
                     Kind: kind,
                     IsNullableValueType: isNullableValueType,
                     NestedContractFullyQualifiedName: nestedContract?.ToDisplayString(FullyQualifiedFormat),
-                    ChildNamespaceToDeclare: ChildNamespaceToDeclare(memberType, contractNamespace)));
+                    ChildNamespaceToDeclare: childNamespace)
+                {
+                    ElementKind = elementKind,
+                    ItemName = itemName,
+                    ElementCanBeNull = elementCanBeNull
+                });
             }
 
             // Order ascending, then ordinal by contract name. Unspecified Order is -1 and cannot be
@@ -346,6 +372,83 @@ public sealed partial class DataContractSerializerGenerator
                 unsupportedReason,
                 baseContract?.ToDisplayString(FullyQualifiedFormat),
                 isRoot);
+        }
+
+        /// <summary>The element type of a supported collection, or null if this is not one.</summary>
+        private static ITypeSymbol? CollectionElementTypeOf(ITypeSymbol type)
+        {
+            if (type is IArrayTypeSymbol { Rank: 1 } array)
+            {
+                return array.ElementType.SpecialType == SpecialType.System_Byte ? null : array.ElementType;
+            }
+
+            if (type is INamedTypeSymbol { IsGenericType: true } generic
+                && generic.ConstructedFrom.ToDisplayString() == "System.Collections.Generic.List<T>")
+            {
+                return generic.TypeArguments[0];
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// How the items of a collection are written, and what element name each gets.
+        /// </summary>
+        /// <remarks>
+        /// The names are XSD-derived and several are not what the CLR type name suggests - sbyte is
+        /// "byte", byte is "unsignedByte", TimeSpan is "duration". They are recorded in the
+        /// SanityPrimitiveArrays fixture, which was produced by the real serializer, so this table
+        /// is checked against the serializer rather than against memory.
+        /// </remarks>
+        private static MemberKind ClassifyCollectionElement(ITypeSymbol collectionType, out string? itemName, out bool canBeNull)
+        {
+            itemName = null;
+            canBeNull = false;
+
+            ITypeSymbol? element = CollectionElementTypeOf(collectionType);
+            if (element is null)
+            {
+                return MemberKind.Unsupported;
+            }
+
+            MemberKind kind = ClassifyMember(element, out bool elementIsNullable, out INamedTypeSymbol? _);
+            if (kind == MemberKind.Unsupported || kind == MemberKind.Collection || kind == MemberKind.Contract || kind == MemberKind.Enum || elementIsNullable)
+            {
+                // Nested collections, contract items and enum items each need more than the item
+                // name to write, so they stay on the reflection path for now.
+                return MemberKind.Unsupported;
+            }
+
+            itemName = kind switch
+            {
+                MemberKind.Boolean => "boolean",
+                MemberKind.Byte => "unsignedByte",
+                MemberKind.SByte => "byte",
+                MemberKind.Int16 => "short",
+                MemberKind.UInt16 => "unsignedShort",
+                MemberKind.Int32 => "int",
+                MemberKind.UInt32 => "unsignedInt",
+                MemberKind.Int64 => "long",
+                MemberKind.UInt64 => "unsignedLong",
+                MemberKind.Single => "float",
+                MemberKind.Double => "double",
+                MemberKind.Decimal => "decimal",
+                MemberKind.Char => "char",
+                MemberKind.String => "string",
+                MemberKind.Guid => "guid",
+                MemberKind.DateTime => "dateTime",
+                MemberKind.TimeSpan => "duration",
+                MemberKind.ByteArray => "base64Binary",
+                _ => null
+            };
+
+            if (itemName is null)
+            {
+                return MemberKind.Unsupported;
+            }
+
+            canBeNull = kind is MemberKind.String or MemberKind.ByteArray;
+            return kind;
         }
 
         /// <summary>
@@ -582,6 +685,14 @@ public sealed partial class DataContractSerializerGenerator
             {
                 nestedContract = enumType;
                 return MemberKind.Enum;
+            }
+
+            // A one-dimensional array of anything but byte, or a List<T>, is written as a
+            // collection. byte[] is deliberately excluded above: the serializer treats it as a
+            // primitive written as base64, not as an array of bytes.
+            if (!isNullableValueType && CollectionElementTypeOf(type) is not null)
+            {
+                return MemberKind.Collection;
             }
 
             // A member that is itself a data contract is written inline by that contract's content

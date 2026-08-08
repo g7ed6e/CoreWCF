@@ -35,6 +35,7 @@ public sealed partial class DataContractSerializerGenerator
         private const string DictionaryWriter = "global::System.Xml.XmlDictionaryWriter";
         private const string XmlConvert = "global::System.Xml.XmlConvert";
         private const string SchemaInstanceNamespace = "http://www.w3.org/2001/XMLSchema-instance";
+        private const string CollectionNamespace = Parser.CollectionNamespace;
 
         private readonly StringBuilder _builder = new();
         private readonly Dictionary<string, int> _contractIndexes = new(StringComparer.Ordinal);
@@ -321,7 +322,7 @@ public sealed partial class DataContractSerializerGenerator
         {
             bool canBeNull = !nullAlreadyExcluded
                 && (member.IsNullableValueType
-                    || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract);
+                    || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection);
 
             _builder.AppendLine($"{indentor}writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});");
 
@@ -352,6 +353,41 @@ public sealed partial class DataContractSerializerGenerator
             if (member.Kind == MemberKind.Contract)
             {
                 _builder.AppendLine($"{indentor}{ContentWriterName(member.NestedContractFullyQualifiedName!)}(writer, {value});");
+            }
+            else if (member.Kind == MemberKind.Collection)
+            {
+                // Items go in the collection namespace, not the containing contract's, and each is
+                // named after its XSD type. An empty collection writes no children at all, which is
+                // why the member element is still opened before this loop.
+                _builder.AppendLine($"{indentor}foreach (var item in {value})");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}writer.WriteStartElement({Literal(member.ItemName!)}, {Literal(CollectionNamespace)});");
+
+                if (member.ElementCanBeNull)
+                {
+                    _builder.AppendLine($"{indentor}if (item == null)");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                    _builder.AppendLine($"{indentor}WriteNil(writer);");
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                    _builder.AppendLine($"{indentor}else");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                }
+
+                _builder.AppendLine($"{indentor}{WriteValueStatement(member.ElementKind, "item")}");
+
+                if (member.ElementCanBeNull)
+                {
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                }
+
+                _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
             }
             else if (member.Kind == MemberKind.Enum)
             {
@@ -406,7 +442,7 @@ public sealed partial class DataContractSerializerGenerator
 
             return member.Kind switch
             {
-                MemberKind.String or MemberKind.ByteArray or MemberKind.Contract => $"{access} == null",
+                MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection => $"{access} == null",
                 MemberKind.Boolean => $"!{access}",
                 _ => $"{access} == default"
             };

@@ -49,7 +49,20 @@ public sealed partial class DataContractSerializerGenerator
         MemberKind Kind,
         bool IsNullableValueType,
         string? NestedContractFullyQualifiedName,
-        string? ChildNamespaceToDeclare) : IEquatable<MemberSpec>;
+        string? ChildNamespaceToDeclare) : IEquatable<MemberSpec>
+    {
+        /// <summary>For <see cref="MemberKind.Collection"/>, how each item is written.</summary>
+        public MemberKind ElementKind { get; init; }
+
+        /// <summary>
+        /// For <see cref="MemberKind.Collection"/>, the element name each item gets - the XSD name
+        /// of the item type, recorded from the serializer itself rather than assumed.
+        /// </summary>
+        public string? ItemName { get; init; }
+
+        /// <summary>For <see cref="MemberKind.Collection"/>, whether an item may be null.</summary>
+        public bool ElementCanBeNull { get; init; }
+    }
 
     /// <summary>
     /// An enum reachable from a contract, reduced to the value-to-wire-name table needed to write it.
@@ -94,6 +107,7 @@ public sealed partial class DataContractSerializerGenerator
         TimeSpan,
         ByteArray,
         Contract,
-        Enum
+        Enum,
+        Collection
     }
 }

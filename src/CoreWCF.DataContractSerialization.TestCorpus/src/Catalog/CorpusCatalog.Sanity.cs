@@ -33,6 +33,9 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
             builder.Add<SanityCollections>("populated", SanityCollections.Populated)
                    .WithTags("collections");
 
+            builder.Add<SanityPrimitiveArrays>("populated", SanityPrimitiveArrays.Populated)
+                   .WithTags("collections", "primitives");
+
             builder.Add<SanityEnums>("populated", SanityEnums.Populated)
                    .WithTags("enums");
 

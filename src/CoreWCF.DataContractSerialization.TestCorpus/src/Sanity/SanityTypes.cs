@@ -239,6 +239,99 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
         }
     }
 
+    /// <summary>
+    /// One array per supported primitive, so the fixture records the element name
+    /// DataContractSerializer gives each. Those names are XSD-derived and not guessable with
+    /// confidence - "byte" is sbyte and "unsignedByte" is byte, TimeSpan is "duration" - so the
+    /// oracle is the specification here rather than memory.
+    /// </summary>
+    [DataContract]
+    public class SanityPrimitiveArrays
+    {
+        [DataMember]
+        public bool[] Booleans { get; set; }
+
+        [DataMember]
+        public byte[][] ByteArrays { get; set; }
+
+        [DataMember]
+        public char[] Chars { get; set; }
+
+        [DataMember]
+        public DateTime[] DateTimes { get; set; }
+
+        [DataMember]
+        public decimal[] Decimals { get; set; }
+
+        [DataMember]
+        public double[] Doubles { get; set; }
+
+        [DataMember]
+        public float[] Floats { get; set; }
+
+        [DataMember]
+        public Guid[] Guids { get; set; }
+
+        [DataMember]
+        public short[] Int16s { get; set; }
+
+        [DataMember]
+        public int[] Int32s { get; set; }
+
+        [DataMember]
+        public long[] Int64s { get; set; }
+
+        [DataMember]
+        public sbyte[] SBytes { get; set; }
+
+        [DataMember]
+        public string[] Strings { get; set; }
+
+        [DataMember]
+        public TimeSpan[] TimeSpans { get; set; }
+
+        [DataMember]
+        public byte[] UnsignedBytes { get; set; }
+
+        [DataMember]
+        public ushort[] UInt16s { get; set; }
+
+        [DataMember]
+        public uint[] UInt32s { get; set; }
+
+        [DataMember]
+        public ulong[] UInt64s { get; set; }
+
+        [DataMember]
+        public List<int> IntList { get; set; }
+
+        public static SanityPrimitiveArrays Populated()
+        {
+            return new SanityPrimitiveArrays
+            {
+                Booleans = new bool[] { true, false },
+                ByteArrays = new byte[][] { new byte[] { 1, 2 } },
+                Chars = new char[] { 'a', 'Z' },
+                DateTimes = new DateTime[] { new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc) },
+                Decimals = new decimal[] { 1.5m },
+                Doubles = new double[] { 0.1 },
+                Floats = new float[] { 2.5f },
+                Guids = new Guid[] { new Guid("2f9e4c1a-0000-4000-8000-000000000002") },
+                Int16s = new short[] { -1, 1 },
+                Int32s = new int[] { 1, 2, 3 },
+                Int64s = new long[] { 4L },
+                SBytes = new sbyte[] { -8 },
+                Strings = new string[] { "a", null },
+                TimeSpans = new TimeSpan[] { new TimeSpan(1, 2, 3) },
+                UnsignedBytes = new byte[] { 7, 8 },
+                UInt16s = new ushort[] { 9 },
+                UInt32s = new uint[] { 10 },
+                UInt64s = new ulong[] { 11 },
+                IntList = new List<int> { 12, 13 }
+            };
+        }
+    }
+
     public enum SanityEnum
     {
         None = 0,
