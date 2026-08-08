@@ -302,7 +302,7 @@ namespace CoreWCF.Dispatcher
         {
             try
             {
-                part.Serializer.WriteObject(writer, graph);
+                part.WriteObject(writer, graph);
             }
             catch (SerializationException sx)
             {
@@ -619,6 +619,8 @@ namespace CoreWCF.Dispatcher
         protected class PartInfo
         {
             private XmlObjectSerializer _serializer;
+            private AotXmlObjectSerializer _aotSerializer;
+            private bool _aotSerializerResolved;
             private readonly IList<Type> _knownTypes;
             private readonly DataContractSerializerOperationBehavior _serializerFactory;
             private readonly bool _isQueryable;
@@ -653,6 +655,47 @@ namespace CoreWCF.Dispatcher
                     }
                     return _serializer;
                 }
+            }
+
+            /// <summary>
+            /// A source-generated serializer for this part, or null to use <see cref="Serializer"/>.
+            /// </summary>
+            /// <remarks>
+            /// Resolved at most once. When the switch is off this never calls the factory at all, so
+            /// the generated path costs nothing for anyone who has not opted in.
+            /// </remarks>
+            public AotXmlObjectSerializer AotSerializer
+            {
+                get
+                {
+                    if (!_aotSerializerResolved)
+                    {
+                        _aotSerializerResolved = true;
+                        if (GeneratedSerializerSwitch.Enabled)
+                        {
+                            _aotSerializer = _serializerFactory.CreateAotSerializer(
+                                ContractType, DictionaryName, DictionaryNamespace, _knownTypes);
+                        }
+                    }
+
+                    return _aotSerializer;
+                }
+            }
+
+            /// <summary>
+            /// Writes <paramref name="graph"/> using the generated serializer when one is available,
+            /// otherwise the reflection-based one.
+            /// </summary>
+            public void WriteObject(XmlDictionaryWriter writer, object graph)
+            {
+                AotXmlObjectSerializer aotSerializer = AotSerializer;
+                if (aotSerializer != null)
+                {
+                    aotSerializer.WriteObject(writer, graph);
+                    return;
+                }
+
+                Serializer.WriteObject(writer, graph);
             }
 
             public object ReadObject(XmlDictionaryReader reader)
