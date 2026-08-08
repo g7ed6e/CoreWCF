@@ -84,6 +84,8 @@ public sealed partial class DataContractSerializerGenerator
             }
 
             EmitGetSerializer(indentor, context);
+            _builder.AppendLine();
+            EmitCoversKnownTypes(indentor, context);
             EmitNilHelper(indentor);
             EmitReferenceScope(indentor);
 
@@ -160,6 +162,66 @@ public sealed partial class DataContractSerializerGenerator
             // anything this context does not cover.
             _builder.AppendLine($"{indentor}return null;");
 
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the answer to "does the serializer for this type already resolve these known
+        /// types?", from the <c>[KnownType]</c> closure each root was compiled against.
+        /// </summary>
+        /// <remarks>
+        /// The test is subset, not equality: an operation that supplies fewer known types than the
+        /// attributes declare is still fully covered. Anything beyond the closure is a type this
+        /// serializer has no branch for, so the honest answer is false and the caller falls back.
+        /// </remarks>
+        private void EmitCoversKnownTypes(Indentor indentor, ContextSpec context)
+        {
+            _builder.AppendLine($"{indentor}/// <inheritdoc />");
+            _builder.AppendLine($"{indentor}public override bool CoversKnownTypes(global::System.Type type, global::System.Collections.Generic.IList<global::System.Type> knownTypes)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (knownTypes == null || knownTypes.Count == 0)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return true;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+
+            foreach (ContractSpec contract in context.Contracts)
+            {
+                if (!contract.IsSupported || !contract.IsRoot || contract.KnownTypes.Count == 0)
+                {
+                    continue;
+                }
+
+                _builder.AppendLine();
+                _builder.AppendLine($"{indentor}if (type == typeof({contract.FullyQualifiedName}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}for (int i = 0; i < knownTypes.Count; i++)");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+
+                bool first = true;
+                foreach (string knownType in contract.KnownTypes)
+                {
+                    string keyword = first ? "if" : "else if";
+                    first = false;
+                    _builder.AppendLine($"{indentor}{keyword} (knownTypes[i] == typeof({knownType})) {{ continue; }}");
+                }
+
+                _builder.AppendLine($"{indentor}return false;");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine();
+                _builder.AppendLine($"{indentor}return true;");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return false;");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
         }
@@ -375,7 +437,11 @@ public sealed partial class DataContractSerializerGenerator
 
             string value = member.IsNullableValueType ? access + ".Value" : access;
 
-            if (member.Kind == MemberKind.Contract)
+            if (member.Kind == MemberKind.Contract && member.Candidates.Count > 0)
+            {
+                EmitPolymorphicMember(indentor, member, value);
+            }
+            else if (member.Kind == MemberKind.Contract)
             {
                 string nested = member.NestedContractFullyQualifiedName!;
 
@@ -453,6 +519,100 @@ public sealed partial class DataContractSerializerGenerator
             }
 
             _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+        }
+
+        /// <summary>
+        /// Emits a member that may hold any of several contracts, chosen by runtime type.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The branch is on exact type equality rather than a type pattern, because a pattern would
+        /// let a base contract's branch swallow a derived instance depending on the order the
+        /// candidates happen to be in. Exact equality makes the emitted code order-independent and
+        /// matches what the serializer does, which is to look up the runtime type's contract.
+        /// </para>
+        /// <para>
+        /// i:type is written for every candidate except the declared type, mirroring
+        /// XmlObjectSerializerWriteContext.WriteTypeInfo, which emits it only when the runtime
+        /// contract differs from the declared one. It goes on before any z:Id because that is the
+        /// order the two sit in upstream: WriteTypeInfo runs in SerializeWithXsiType, and
+        /// OnHandleIsReference runs later, inside the class writer it delegates to.
+        /// </para>
+        /// <para>
+        /// A runtime type outside the set throws, exactly as the reflection path does with
+        /// DcTypeNotFoundOnSerialize. Falling back is not an option here: by this point the element
+        /// is already open and half a document has been written.
+        /// </para>
+        /// </remarks>
+        private void EmitPolymorphicMember(Indentor indentor, MemberSpec member, string value)
+        {
+            string declared = member.NestedContractFullyQualifiedName!;
+            string local = "__runtimeType";
+
+            _builder.AppendLine($"{indentor}global::System.Type {local} = {value}.GetType();");
+
+            bool first = true;
+            foreach (string candidate in member.Candidates)
+            {
+                ContractSpec spec = _contractSpecs[candidate];
+
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} ({local} == typeof({candidate}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                first = false;
+
+                if (!string.Equals(candidate, declared, StringComparison.Ordinal))
+                {
+                    EmitXsiType(indentor, spec);
+                }
+
+                string typed = $"(({candidate}){value})";
+
+                if (spec.IsReference)
+                {
+                    _builder.AppendLine($"{indentor}if (!scope.WriteIdOrRef(writer, {value}))");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                    _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                }
+                else
+                {
+                    _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+                }
+
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Type '\" + {local}.FullName + \"' is not among the known types for this contract.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the <c>i:type</c> attribute naming a contract.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors XmlWriterDelegator.WriteAttributeQualifiedName: the value's namespace is declared
+        /// first, then the attribute is opened and the qualified name written into it. Declaring
+        /// first is what lets the writer reuse a prefix already in scope - which is why i:type on a
+        /// contract in the root's own namespace reads "a:Derived" and adds no declaration, while one
+        /// in a different namespace brings its own xmlns with it.
+        /// </remarks>
+        private void EmitXsiType(Indentor indentor, ContractSpec contract)
+        {
+            _builder.AppendLine($"{indentor}writer.WriteXmlnsAttribute(null, {Literal(contract.ContractNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteStartAttribute(\"i\", \"type\", {Literal(SchemaInstanceNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteQualifiedName({Literal(contract.ContractName)}, {Literal(contract.ContractNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteEndAttribute();");
         }
 
         /// <summary>

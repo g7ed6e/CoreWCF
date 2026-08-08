@@ -26,6 +26,7 @@ public sealed partial class DataContractSerializerGenerator
         internal const string SerializableAttributeName = "CoreWCF.DataContractSerialization.DataContractSerializableAttribute";
         internal const string DataContractAttributeName = "System.Runtime.Serialization.DataContractAttribute";
         internal const string DataMemberAttributeName = "System.Runtime.Serialization.DataMemberAttribute";
+        internal const string KnownTypeAttributeName = "System.Runtime.Serialization.KnownTypeAttribute";
 
         /// <summary>The namespace a contract gets when it does not name one itself.</summary>
         private const string DefaultNamespacePrefix = "http://schemas.datacontract.org/2004/07/";
@@ -113,6 +114,7 @@ public sealed partial class DataContractSerializerGenerator
                 }
             }
 
+            PropagateKnownTypes(contracts);
             PropagateUnsupported(contracts);
 
             string? containingNamespace = contextType.ContainingNamespace.IsGlobalNamespace
@@ -164,6 +166,79 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Rolls each contract's known types up through the graph, so a root's set is everything
+        /// reachable from it rather than only what it declares itself.
+        /// </summary>
+        /// <remarks>
+        /// This set answers one question, asked at run time: are the known types CoreWCF supplies
+        /// from the operation description ones this serializer already resolves? Since the operation
+        /// names types for the whole graph, the answer has to be drawn from the whole graph too - a
+        /// root that declares nothing but whose member type declares a derived contract does resolve
+        /// that contract, and should say so.
+        /// </remarks>
+        private static void PropagateKnownTypes(Dictionary<string, ContractSpec> contracts)
+        {
+            Dictionary<string, HashSet<string>> sets = new(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, ContractSpec> entry in contracts)
+            {
+                sets[entry.Key] = new HashSet<string>(entry.Value.KnownTypes, StringComparer.Ordinal);
+            }
+
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+
+                foreach (KeyValuePair<string, ContractSpec> entry in contracts)
+                {
+                    HashSet<string> target = sets[entry.Key];
+
+                    foreach (string dependency in Dependencies(entry.Value))
+                    {
+                        if (sets.TryGetValue(dependency, out HashSet<string> source))
+                        {
+                            foreach (string knownType in source)
+                            {
+                                changed |= target.Add(knownType);
+                            }
+                        }
+                    }
+                }
+            }
+
+            foreach (string key in contracts.Keys.ToArray())
+            {
+                contracts[key] = contracts[key] with
+                {
+                    KnownTypes = new EquatableArray<string>(sets[key]
+                        .OrderBy(n => n, StringComparer.Ordinal)
+                        .ToArray())
+                };
+            }
+
+            static IEnumerable<string> Dependencies(ContractSpec spec)
+            {
+                if (spec.BaseContractFullyQualifiedName is string baseName)
+                {
+                    yield return baseName;
+                }
+
+                foreach (MemberSpec member in spec.Members)
+                {
+                    if (member.NestedContractFullyQualifiedName is string nested)
+                    {
+                        yield return nested;
+                    }
+
+                    foreach (string candidate in member.Candidates)
+                    {
+                        yield return candidate;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// A contract whose nested contract or base contract cannot be written cannot be written
         /// either. Repeats until nothing changes, since the dependency can be several deep.
         /// </summary>
@@ -210,6 +285,19 @@ public sealed partial class DataContractSerializerGenerator
                     return "member '" + member.MemberName + "' has unsupported contract type " + nested +
                            " (" + nestedSpec.UnsupportedReason + ")";
                 }
+
+                // A polymorphic member is only writable if every type it may hold is. Missing one
+                // would leave a runtime type with no branch, which is a throw at run time rather
+                // than the fallback the caller is entitled to.
+                foreach (string candidate in member.Candidates)
+                {
+                    if (contracts.TryGetValue(candidate, out ContractSpec candidateSpec)
+                        && !candidateSpec.IsSupported)
+                    {
+                        return "member '" + member.MemberName + "' may hold unsupported contract type " + candidate +
+                               " (" + candidateSpec.UnsupportedReason + ")";
+                    }
+                }
             }
 
             return null;
@@ -236,6 +324,12 @@ public sealed partial class DataContractSerializerGenerator
             if (isReference && contractType.IsValueType)
             {
                 unsupportedReason = "IsReference is not valid on a value type";
+            }
+
+            List<INamedTypeSymbol> knownTypes = new();
+            if (!TryCollectKnownTypes(contractType, knownTypes, out string? knownTypeReason))
+            {
+                unsupportedReason ??= knownTypeReason;
             }
 
             // A contract from another assembly is only safe if every one of its data members is
@@ -331,9 +425,41 @@ public sealed partial class DataContractSerializerGenerator
                                           memberType.ToDisplayString() + "'";
                 }
 
+                List<string> candidates = new();
+
                 if (nestedContract is not null && kind == MemberKind.Contract)
                 {
                     referenced.Add(nestedContract);
+
+                    // A member declared as a contract that [KnownType] gives derived alternatives to
+                    // must decide its writer at run time and announce the choice with i:type.
+                    // Without this the declared type's members would be written for a derived
+                    // instance - output that is well-formed, plausible and wrong.
+                    //
+                    // The attribute may sit on either end: on the contract holding the member, or on
+                    // the member's own declared type. The serializer has both in scope while writing
+                    // the member - it pushes each contract's known types as it descends - so both
+                    // are collected here. Reading only one end silently loses the other's types.
+                    List<INamedTypeSymbol> inScope = new(knownTypes);
+                    if (!TryCollectKnownTypes(nestedContract, inScope, out string? memberKnownTypeReason))
+                    {
+                        unsupportedReason ??= memberKnownTypeReason;
+                    }
+
+                    foreach (INamedTypeSymbol derived in PolymorphicCandidates(nestedContract, inScope))
+                    {
+                        referenced.Add(derived);
+                        candidates.Add(derived.ToDisplayString(FullyQualifiedFormat));
+                    }
+
+                    // An abstract declared type with nothing to resolve to can only ever hold an
+                    // instance of a type no [KnownType] names. Writing the declared contract's
+                    // members for it would be wrong, so decline instead.
+                    if (candidates.Count == 0 && nestedContract.IsAbstract)
+                    {
+                        unsupportedReason ??= "member '" + member.Name + "' is declared as abstract contract " +
+                                              nestedContract.Name + " with no [KnownType] to resolve it";
+                    }
                 }
                 else if (nestedContract is not null && kind == MemberKind.Enum)
                 {
@@ -371,7 +497,8 @@ public sealed partial class DataContractSerializerGenerator
                 {
                     ElementKind = elementKind,
                     ItemName = itemName,
-                    ElementCanBeNull = elementCanBeNull
+                    ElementCanBeNull = elementCanBeNull,
+                    Candidates = new EquatableArray<string>(candidates.ToArray())
                 });
             }
 
@@ -393,7 +520,11 @@ public sealed partial class DataContractSerializerGenerator
                 baseContract?.ToDisplayString(FullyQualifiedFormat),
                 isRoot)
             {
-                IsReference = isReference
+                IsReference = isReference,
+                KnownTypes = new EquatableArray<string>(knownTypes
+                    .Select(t => t.ToDisplayString(FullyQualifiedFormat))
+                    .OrderBy(n => n, StringComparer.Ordinal)
+                    .ToArray())
             };
         }
 
@@ -559,29 +690,131 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
-        /// Whether a type or anything in its hierarchy declares <c>[KnownType]</c>, meaning a member
-        /// of that type may hold a derived instance.
+        /// Whether a type or anything in its hierarchy declares known types the generator cannot
+        /// enumerate at compile time.
         /// </summary>
         /// <remarks>
-        /// Without a known type there is nothing to be polymorphic with: DataContractSerializer
-        /// itself throws on an unexpected runtime type rather than guessing, so declared and runtime
-        /// type must agree. With one, the real serializer emits an i:type attribute and the derived
-        /// contract's members, which this slice does not do - and writing the declared type's
-        /// members instead would produce wrong XML rather than falling back.
+        /// <c>[KnownType]</c> naming a type is handled - see TryCollectKnownTypes. The service-level
+        /// attributes are not: they are resolved against the operation at run time, so a member of
+        /// such a type may hold an instance no attribute here names. Writing the declared type's
+        /// members for one would produce wrong XML rather than falling back.
         /// </remarks>
-        private static bool DeclaresKnownTypes(INamedTypeSymbol type)
+        private static bool DeclaresRuntimeKnownTypes(INamedTypeSymbol type)
         {
             for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
             {
                 foreach (AttributeData attribute in current.GetAttributes())
                 {
                     string? name = attribute.AttributeClass?.ToDisplayString();
-                    if (name is "System.Runtime.Serialization.KnownTypeAttribute"
-                        or "CoreWCF.ServiceKnownTypeAttribute"
+                    if (name is "CoreWCF.ServiceKnownTypeAttribute"
                         or "System.ServiceModel.ServiceKnownTypeAttribute")
                     {
                         return true;
                     }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Every type reachable from this contract's <c>[KnownType]</c> attributes.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors DataContract.ImportKnownTypeAttributes in dotnet/runtime, which is more than a
+        /// read of the type's own attributes: the base chain is walked, so a derived contract
+        /// inherits what its base declared, and the closure is transitive, so a known type's own
+        /// <c>[KnownType]</c>s join it. Missing either would silently narrow the set of runtime
+        /// types a member is allowed to hold, turning a document the real serializer writes into an
+        /// exception here.
+        /// </remarks>
+        private static bool TryCollectKnownTypes(INamedTypeSymbol contractType, List<INamedTypeSymbol> knownTypes, out string? unsupportedReason)
+        {
+            HashSet<string> seen = new(StringComparer.Ordinal);
+            Queue<INamedTypeSymbol> pending = new();
+            pending.Enqueue(contractType);
+            seen.Add(contractType.ToDisplayString(FullyQualifiedFormat));
+
+            while (pending.Count > 0)
+            {
+                for (INamedTypeSymbol? current = pending.Dequeue(); current is not null; current = current.BaseType)
+                {
+                    foreach (AttributeData attribute in current.GetAttributes())
+                    {
+                        if (attribute.AttributeClass?.ToDisplayString() != KnownTypeAttributeName)
+                        {
+                            continue;
+                        }
+
+                        if (attribute.ConstructorArguments.Length != 1
+                            || attribute.ConstructorArguments[0].Value is not INamedTypeSymbol knownType)
+                        {
+                            // The methodName overload names a method returning the known types at
+                            // run time. Nothing here can evaluate it, and guessing would produce a
+                            // serializer that rejects instances the real one accepts.
+                            unsupportedReason = "[KnownType] on " + current.Name +
+                                                " names a method, which the generator cannot evaluate";
+                            return false;
+                        }
+
+                        if (seen.Add(knownType.ToDisplayString(FullyQualifiedFormat)))
+                        {
+                            knownTypes.Add(knownType);
+                            pending.Enqueue(knownType);
+                        }
+                    }
+                }
+            }
+
+            unsupportedReason = null;
+            return true;
+        }
+
+        /// <summary>
+        /// The runtime types a member declared as <paramref name="declaredType"/> may hold, or an
+        /// empty list when only the declared type itself is possible.
+        /// </summary>
+        /// <remarks>
+        /// A non-empty result is what makes the member polymorphic and puts <c>i:type</c> on the
+        /// wire. The declared type is included unless it is abstract, since an abstract contract
+        /// can never be the runtime type.
+        /// </remarks>
+        private static List<INamedTypeSymbol> PolymorphicCandidates(INamedTypeSymbol declaredType, List<INamedTypeSymbol> knownTypes)
+        {
+            List<INamedTypeSymbol> candidates = new();
+            HashSet<string> added = new(StringComparer.Ordinal);
+
+            foreach (INamedTypeSymbol knownType in knownTypes)
+            {
+                if (!SymbolEqualityComparer.Default.Equals(knownType, declaredType)
+                    && DerivesFrom(knownType, declaredType)
+                    && GetAttribute(knownType, DataContractAttributeName) is not null
+                    && added.Add(knownType.ToDisplayString(FullyQualifiedFormat)))
+                {
+                    candidates.Add(knownType);
+                }
+            }
+
+            if (candidates.Count == 0)
+            {
+                return candidates;
+            }
+
+            if (!declaredType.IsAbstract)
+            {
+                candidates.Insert(0, declaredType);
+            }
+
+            return candidates;
+        }
+
+        private static bool DerivesFrom(INamedTypeSymbol type, INamedTypeSymbol candidateBase)
+        {
+            for (INamedTypeSymbol? current = type.BaseType; current is not null; current = current.BaseType)
+            {
+                if (SymbolEqualityComparer.Default.Equals(current, candidateBase))
+                {
+                    return true;
                 }
             }
 
@@ -725,9 +958,7 @@ public sealed partial class DataContractSerializerGenerator
                 && named.TypeKind == TypeKind.Class
                 && GetAttribute(named, DataContractAttributeName) is not null)
             {
-                // A member whose declared type admits derived instances needs an i:type attribute
-                // and the derived contract's members, which this slice does not emit.
-                if (DeclaresKnownTypes(named))
+                if (DeclaresRuntimeKnownTypes(named))
                 {
                     return MemberKind.Unsupported;
                 }

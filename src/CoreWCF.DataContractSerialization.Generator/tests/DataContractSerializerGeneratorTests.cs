@@ -548,6 +548,165 @@ namespace App
         }
 
         [Fact]
+        public void PolymorphicMember_WritesAnXsiTypeAndTheDerivedContractsMembers()
+        {
+            // A member declared as a base contract may hold a derived one. The serializer announces
+            // that with i:type and writes the derived contract's members; writing the declared
+            // type's members instead is well-formed, plausible and wrong.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    [KnownType(typeof(Derived))]
+    public class Base
+    {
+        [DataMember] public int BaseValue { get; set; }
+    }
+
+    [DataContract]
+    public class Derived : Base
+    {
+        [DataMember] public int DerivedValue { get; set; }
+    }
+
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public Base Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // Exact type equality, not a type pattern: a pattern would let the base branch swallow
+            // a derived instance depending on the order the candidates happen to be in.
+            Assert.Contains("__runtimeType == typeof(global::App.Derived)", result.SingleSource);
+            Assert.Contains("__runtimeType == typeof(global::App.Base)", result.SingleSource);
+            Assert.Contains("writer.WriteQualifiedName(\"Derived\"", result.SingleSource);
+
+            // ...and not for the declared type, which is what the reader already assumes.
+            Assert.DoesNotContain("writer.WriteQualifiedName(\"Base\"", result.SingleSource);
+        }
+
+        [Fact]
+        public void KnownTypeOnTheMemberType_IsFound()
+        {
+            // The attribute may sit on either end - the contract holding the member, or the member's
+            // own declared type. The serializer has both in scope while writing the member, so
+            // reading only the holder would silently lose the other's types and emit the base
+            // contract's members for a derived instance.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    [KnownType(typeof(Derived))]
+    public class Base
+    {
+        [DataMember] public int BaseValue { get; set; }
+    }
+
+    [DataContract]
+    public class Derived : Base
+    {
+        [DataMember] public int DerivedValue { get; set; }
+    }
+
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public Base Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("__runtimeType == typeof(global::App.Derived)", result.SingleSource);
+
+            // The root declares no [KnownType] of its own, but resolves one - so it must say so when
+            // CoreWCF asks whether the operation's known types are covered.
+            Assert.Contains("knownTypes[i] == typeof(global::App.Derived)", result.SingleSource);
+        }
+
+        [Fact]
+        public void AbstractMemberTypeWithoutAKnownType_LeavesTheContractToReflection()
+        {
+            // Nothing can ever be an instance of the declared type, so every value this member holds
+            // is one no [KnownType] names. Writing the abstract contract's members would be wrong.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public abstract class Shape
+    {
+        [DataMember] public int Sides { get; set; }
+    }
+
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public Shape Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("declared as abstract contract Shape", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.Holder))", result.SingleSource);
+        }
+
+        [Fact]
+        public void KnownTypeNamingAMethod_LeavesTheContractToReflection()
+        {
+            // The methodName overload returns its types at run time. Nothing here can evaluate it,
+            // and assuming there are none would make the serializer reject instances the real one
+            // accepts.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    [KnownType(""GetKnownTypes"")]
+    public class Holder
+    {
+        [DataMember] public int Value { get; set; }
+
+        public static System.Type[] GetKnownTypes() => new System.Type[0];
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("names a method", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.Holder))", result.SingleSource);
+        }
+
+        [Fact]
+        public void ContractWithoutKnownTypes_CoversNoOperationKnownTypes()
+        {
+            // CoreWCF supplies known types from the operation description, which no attribute
+            // reveals. A serializer compiled against none resolves none, so the honest answer is
+            // false and the caller falls back.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
+    [DataContractSerializable(typeof(Order))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("public override bool CoversKnownTypes", result.SingleSource);
+            Assert.DoesNotContain("knownTypes[i] == typeof(", result.SingleSource);
+        }
+
+        [Fact]
         public void IsReferenceOnAValueType_LeavesTheContractToReflection()
         {
             // A struct has no identity to preserve, and DataContractSerializer rejects the

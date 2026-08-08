@@ -33,16 +33,14 @@ namespace CoreWCF.DataContractSerialization
 
         public override AotXmlObjectSerializer CreateAotSerializer(Type type, XmlDictionaryString name, XmlDictionaryString ns, IList<Type> knownTypes)
         {
-            // Known types mean a member may hold a derived instance, which the real serializer
-            // signals with an i:type attribute and the derived contract's members. Generated
-            // serializers do not emit that yet, and writing the declared type's members instead
-            // would produce wrong XML rather than falling back - so decline and let the
-            // reflection-based serializer handle it.
-            //
-            // The generator makes the same judgement at compile time from [KnownType] attributes;
-            // this catches the case where CoreWCF supplies known types from the operation contract
-            // instead, which no attribute would reveal.
-            if (knownTypes != null && knownTypes.Count > 0)
+            // Known types mean a member may hold a derived instance, which the serializer signals
+            // with i:type and the derived contract's members. A generated serializer resolves the
+            // closure of the [KnownType] attributes it was compiled against and nothing else, so a
+            // known type supplied by the operation description - which no attribute reveals to the
+            // generator - has to be checked against that closure before the work is taken on.
+            // Declining sends the operation to the reflection-based serializer, which is always
+            // correct; taking it and failing later would fail with the element already open.
+            if (!_context.CoversKnownTypes(type, knownTypes))
             {
                 return null;
             }

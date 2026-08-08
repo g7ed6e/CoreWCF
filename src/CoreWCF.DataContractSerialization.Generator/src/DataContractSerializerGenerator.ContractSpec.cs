@@ -34,6 +34,16 @@ public sealed partial class DataContractSerializerGenerator
         /// </remarks>
         public bool IsReference { get; init; }
 
+        /// <summary>
+        /// The transitive closure of this contract's <c>[KnownType]</c> attributes.
+        /// </summary>
+        /// <remarks>
+        /// Recorded on the spec so the generated context can answer, at run time, whether the known
+        /// types CoreWCF supplies from the operation are ones this serializer already resolves.
+        /// Anything beyond them has to go back to reflection.
+        /// </remarks>
+        public EquatableArray<string> KnownTypes { get; init; } = new EquatableArray<string>(Array.Empty<string>());
+
         public bool IsSupported => UnsupportedReason is null;
 
         /// <summary>Same contract, newly declared unsupported.</summary>
@@ -73,6 +83,16 @@ public sealed partial class DataContractSerializerGenerator
 
         /// <summary>For <see cref="MemberKind.Collection"/>, whether an item may be null.</summary>
         public bool ElementCanBeNull { get; init; }
+
+        /// <summary>
+        /// For <see cref="MemberKind.Contract"/>, every runtime type this member may hold - empty
+        /// when only the declared type is possible.
+        /// </summary>
+        /// <remarks>
+        /// Non-empty makes the member polymorphic: the writer is chosen by exact runtime type and
+        /// the choice is announced with <c>i:type</c>, except for the declared type itself.
+        /// </remarks>
+        public EquatableArray<string> Candidates { get; init; } = new EquatableArray<string>(Array.Empty<string>());
     }
 
     /// <summary>

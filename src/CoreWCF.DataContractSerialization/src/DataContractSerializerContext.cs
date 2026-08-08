@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using System.Xml;
 using CoreWCF.Runtime.Serialization;
 
@@ -36,6 +37,23 @@ namespace CoreWCF.DataContractSerialization
         public virtual AotXmlObjectSerializer GetSerializer(Type type, XmlDictionaryString name, XmlDictionaryString ns)
         {
             return null;
+        }
+
+        /// <summary>
+        /// Whether the serializer this context would return for <paramref name="type"/> already
+        /// resolves every one of <paramref name="knownTypes"/>.
+        /// </summary>
+        /// <remarks>
+        /// CoreWCF supplies known types from the operation description, which no attribute reveals
+        /// to the generator. A generated serializer resolves exactly the closure of the
+        /// <c>[KnownType]</c> attributes it was compiled against, so anything outside that closure
+        /// is a type it would refuse at run time - and refusing mid-document is far worse than not
+        /// taking the work. Answering false sends the operation back to the reflection-based
+        /// serializer, which is always correct.
+        /// </remarks>
+        public virtual bool CoversKnownTypes(Type type, IList<Type> knownTypes)
+        {
+            return knownTypes == null || knownTypes.Count == 0;
         }
     }
 }
