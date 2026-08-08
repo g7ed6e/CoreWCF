@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -41,6 +41,7 @@ public sealed partial class DataContractSerializerGenerator
         private const string SystemContractNamespace = Parser.SystemContractNamespace;
         private const string ReferenceScope = "__ReferenceScope";
         private const string DateOnlyIsPrimitive = "__DateOnlyIsPrimitive";
+        private const string DictionaryReader = "global::System.Xml.XmlDictionaryReader";
 
         private readonly StringBuilder _builder = new();
         private readonly Dictionary<string, int> _contractIndexes = new(StringComparer.Ordinal);
@@ -93,6 +94,7 @@ public sealed partial class DataContractSerializerGenerator
             EmitDateTimeOffsetHelper(indentor);
             EmitQNameHelper(indentor);
             EmitDateOnlyHelpers(indentor);
+            EmitReadHelpers(indentor);
             EmitAnyTypeHelper(indentor);
             EmitReferenceScope(indentor);
 
@@ -116,6 +118,12 @@ public sealed partial class DataContractSerializerGenerator
 
                 _builder.AppendLine();
                 EmitContentWriter(indentor, contract);
+
+                if (IsReadable(contract))
+                {
+                    _builder.AppendLine();
+                    EmitContentReader(indentor, contract);
+                }
 
                 if (contract.IsRoot)
                 {
@@ -319,6 +327,78 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
 
+            if (IsReadable(contract))
+            {
+                EmitReadObject(indentor, contract);
+            }
+
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the read side of a serializer: the opt-in flag, the start test and ReadObject.
+        /// </summary>
+        /// <remarks>
+        /// <c>CanReadObject</c> is false on the base class, so a contract this slice does not cover
+        /// never claims to read and the caller keeps the reflection-based serializer. That is the
+        /// same shape as GetSerializer returning null, one level down.
+        /// </remarks>
+        private void EmitReadObject(Indentor indentor, ContractSpec contract)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <inheritdoc />");
+            _builder.AppendLine($"{indentor}public override bool CanReadObject => true;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <inheritdoc />");
+            _builder.AppendLine($"{indentor}public override bool IsStartObject({DictionaryReader} reader)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}return reader.IsStartElement(_name, _ns);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <inheritdoc />");
+            _builder.AppendLine($"{indentor}public override object ReadObject({DictionaryReader} reader, bool verifyObjectName)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (verifyObjectName && !reader.IsStartElement(_name, _ns))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Expecting element '\" + _name.Value + \"' from namespace '\" + _ns.Value + \"'.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}return null;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}{contract.FullyQualifiedName} result = new {contract.FullyQualifiedName}();");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            _builder.AppendLine($"{indentor}return result;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}{ContentReaderName(contract)}(reader, {(contract.IsValueType ? "ref " : string.Empty)}result);");
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return result;");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
         }
@@ -1384,6 +1464,200 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}}}");
         }
 
+        /// <summary>
+        /// Emits the method that reads a contract's members from an already-open element.
+        /// </summary>
+        private void EmitContentReader(Indentor indentor, ContractSpec contract)
+        {
+            _builder.AppendLine($"{indentor}/// <summary>Reads the members of {contract.ContractName} into an existing instance.</summary>");
+            _builder.AppendLine($"{indentor}private static void {ContentReaderName(contract)}({DictionaryReader} reader, {(contract.IsValueType ? "ref " : string.Empty)}{contract.FullyQualifiedName} value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}int __matched = -1;");
+            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+
+            int index = 0;
+            foreach (MemberSpec member in contract.Members)
+            {
+                string keyword = index == 0 ? "if" : "else if";
+                _builder.AppendLine($"{indentor}{keyword} (__matched < {index}");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}&& reader.LocalName == {Literal(member.Name)}");
+                _builder.AppendLine($"{indentor}&& reader.NamespaceURI == {Literal(contract.ContractNamespace)})");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitMemberRead(indentor, member);
+                _builder.AppendLine($"{indentor}__matched = {index};");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                index++;
+            }
+
+            if (contract.Members.Count > 0)
+            {
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+            }
+
+            // An element matching no member is skipped, exactly as the reflection reader does with
+            // one it cannot place. That is what lets a document carry members this contract does
+            // not know about without the read failing.
+            _builder.AppendLine($"{indentor}reader.Skip();");
+
+            if (contract.Members.Count > 0)
+            {
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        private void EmitMemberRead(Indentor indentor, MemberSpec member)
+        {
+            string target = "value." + member.MemberName;
+
+            if (member.Kind == MemberKind.ByteArray)
+            {
+                _builder.AppendLine($"{indentor}if (IsNil(reader))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}reader.Skip();");
+                _builder.AppendLine($"{indentor}{target} = null;");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}{target} = reader.ReadElementContentAsBase64();");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                return;
+            }
+
+            _builder.AppendLine($"{indentor}string __text = ReadText(reader);");
+            _builder.AppendLine($"{indentor}if (__text == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{target} = default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{target} = {ReadValueExpression(member.Kind, "__text")};");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Whether this contract can be read back, which is a narrower question than whether it can
+        /// be written.
+        /// </summary>
+        /// <remarks>
+        /// The first read slice covers a flat contract of built-in members and nothing else.
+        /// Inheritance, nested contracts, collections, polymorphism and IsReference each need the
+        /// read counterpart of machinery the write side already has, and every one of them is a way
+        /// to silently produce a graph that is not the one recorded - so they stay unreadable until
+        /// they are implemented rather than being approximated.
+        /// </remarks>
+        private static bool IsReadable(ContractSpec contract)
+        {
+            if (!contract.IsSupported
+                || !contract.HasParameterlessConstructor
+                || contract.BaseContractFullyQualifiedName is not null
+                || contract.IsReference)
+            {
+                return false;
+            }
+
+            foreach (MemberSpec member in contract.Members)
+            {
+                if (!member.IsSettable || ReadValueExpression(member.Kind, "__text") is null)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The expression that turns an element's text back into a member's value, or null when the
+        /// kind is not one this slice reads.
+        /// </summary>
+        /// <remarks>
+        /// The inverse of WriteValueStatement, and it has to stay that way: char went out as its
+        /// numeric value so it comes back through an int, and DateTime needs RoundtripKind or the
+        /// Utc flag the writer recorded is dropped on the way in.
+        /// </remarks>
+        private static string? ReadValueExpression(MemberKind kind, string text) => kind switch
+        {
+            MemberKind.Boolean => $"{XmlConvert}.ToBoolean({text})",
+            MemberKind.Byte => $"{XmlConvert}.ToByte({text})",
+            MemberKind.SByte => $"{XmlConvert}.ToSByte({text})",
+            MemberKind.Int16 => $"{XmlConvert}.ToInt16({text})",
+            MemberKind.UInt16 => $"{XmlConvert}.ToUInt16({text})",
+            MemberKind.Int32 => $"{XmlConvert}.ToInt32({text})",
+            MemberKind.UInt32 => $"{XmlConvert}.ToUInt32({text})",
+            MemberKind.Int64 => $"{XmlConvert}.ToInt64({text})",
+            MemberKind.UInt64 => $"{XmlConvert}.ToUInt64({text})",
+            MemberKind.Single => $"{XmlConvert}.ToSingle({text})",
+            MemberKind.Double => $"{XmlConvert}.ToDouble({text})",
+            MemberKind.Decimal => $"{XmlConvert}.ToDecimal({text})",
+            MemberKind.Char => $"(char){XmlConvert}.ToInt32({text})",
+            MemberKind.String => text,
+            MemberKind.Guid => $"{XmlConvert}.ToGuid({text})",
+            MemberKind.TimeSpan => $"{XmlConvert}.ToTimeSpan({text})",
+            MemberKind.DateTime =>
+                $"{XmlConvert}.ToDateTime({text}, global::System.Xml.XmlDateTimeSerializationMode.RoundtripKind)",
+            MemberKind.Uri => $"new global::System.Uri({text}, global::System.UriKind.RelativeOrAbsolute)",
+            _ => null
+        };
+
+        /// <summary>
+        /// Emits the reader shared by every generated serializer: the nil test and the element walk.
+        /// </summary>
+        /// <remarks>
+        /// The walk mirrors ReflectionXmlFormatReader.ReflectionReadMembers, which scans forward
+        /// only: a member can match an element only if it comes after the last one matched, and an
+        /// element matching nothing is skipped rather than being an error. That is what makes an
+        /// absent member keep its default and an unknown element harmless.
+        /// </remarks>
+        private void EmitReadHelpers(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static bool IsNil({DictionaryReader} reader) =>");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.GetAttribute(\"nil\", {Literal(SchemaInstanceNamespace)}) == \"true\";");
+            indentor.Decrement();
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <summary>Reads an element's text, or null when it carries i:nil.</summary>");
+            _builder.AppendLine($"{indentor}private static string ReadText({DictionaryReader} reader)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}return null;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return reader.ReadElementContentAsString();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
         private void EmitNilHelper(Indentor indentor)
         {
             _builder.AppendLine();
@@ -1397,6 +1671,9 @@ public sealed partial class DataContractSerializerGenerator
 
         private string SerializerTypeName(ContractSpec contract) =>
             "__DataContractSerializer" + _contractIndexes[contract.FullyQualifiedName].ToString();
+
+        private string ContentReaderName(ContractSpec contract) =>
+            "__ReadContent" + _contractIndexes[contract.FullyQualifiedName].ToString();
 
         private string ContentWriterName(ContractSpec contract) => ContentWriterName(contract.FullyQualifiedName);
 

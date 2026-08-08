@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -43,6 +43,25 @@ public sealed partial class DataContractSerializerGenerator
         /// Anything beyond them has to go back to reflection.
         /// </remarks>
         public EquatableArray<string> KnownTypes { get; init; } = new EquatableArray<string>(Array.Empty<string>());
+
+        /// <summary>
+        /// Whether the type can be constructed by generated code.
+        /// </summary>
+        /// <remarks>
+        /// DataContractSerializer does not need this - it allocates without running a constructor -
+        /// but generated code has no such option, so a contract without an accessible parameterless
+        /// constructor can be written and not read.
+        /// </remarks>
+        public bool HasParameterlessConstructor { get; init; }
+
+        /// <summary>
+        /// Whether the contract is a struct, so a reader has to take it by reference.
+        /// </summary>
+        /// <remarks>
+        /// Passing one by value reads the whole document and then throws the result away, member by
+        /// member, without failing anywhere - which is exactly how it presented.
+        /// </remarks>
+        public bool IsValueType { get; init; }
 
         public bool IsSupported => UnsupportedReasons.Count == 0;
 
@@ -117,6 +136,9 @@ public sealed partial class DataContractSerializerGenerator
 
         /// <summary>For a jagged collection, whether an innermost item may be null.</summary>
         public bool NestedElementCanBeNull { get; init; }
+
+        /// <summary>Whether generated code can assign this member, as opposed to only read it.</summary>
+        public bool IsSettable { get; init; }
 
         /// <summary>For <see cref="MemberKind.Dictionary"/>, how the key is written.</summary>
         public MemberKind KeyKind { get; init; }

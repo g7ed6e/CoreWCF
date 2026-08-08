@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -623,6 +623,12 @@ public sealed partial class DataContractSerializerGenerator
                     ItemName = itemName,
                     ItemNamespace = itemNamespace,
                     ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
+                    IsSettable = member switch
+                    {
+                        IPropertySymbol property => property.SetMethod is { DeclaredAccessibility: Accessibility.Public },
+                        IFieldSymbol field => !field.IsReadOnly,
+                        _ => false
+                    },
                     NestedItemName = nestedItemName,
                     NestedElementKind = nestedElementKind,
                     NestedElementCanBeNull = nestedElementCanBeNull,
@@ -656,6 +662,10 @@ public sealed partial class DataContractSerializerGenerator
                 isRoot)
             {
                 IsReference = isReference,
+                IsValueType = contractType.IsValueType,
+                HasParameterlessConstructor = contractType.IsValueType
+                    || contractType.InstanceConstructors.Any(c =>
+                        c.Parameters.Length == 0 && c.DeclaredAccessibility == Accessibility.Public),
                 KnownTypes = new EquatableArray<string>(knownTypes
                     .Select(t => t.ToDisplayString(FullyQualifiedFormat))
                     .OrderBy(n => n, StringComparer.Ordinal)
