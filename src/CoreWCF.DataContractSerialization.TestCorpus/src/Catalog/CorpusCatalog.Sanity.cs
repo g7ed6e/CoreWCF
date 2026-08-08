@@ -36,6 +36,10 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
             builder.Add<SanityPrimitiveArrays>("populated", SanityPrimitiveArrays.Populated)
                    .WithTags("collections", "primitives");
 
+            builder.Add<SanityBoxedPrimitives>("populated", SanityBoxedPrimitives.Populated)
+                   .WithKnownTypes(typeof(SanityNestedNamespace))
+                   .WithTags("polymorphism", "primitives");
+
             builder.Add<SanityEnums>("populated", SanityEnums.Populated)
                    .WithTags("enums");
 

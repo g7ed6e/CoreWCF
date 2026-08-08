@@ -465,6 +465,25 @@ public sealed partial class DataContractSerializerGenerator
                 {
                     enums.Add(nestedContract);
                 }
+                else if (kind == MemberKind.Object)
+                {
+                    // object constrains nothing, so every known type in scope is a candidate. The
+                    // boxed primitives are always allowed and are added by the emitter; a known type
+                    // that is not a writable contract - an enum, a [Serializable] type - would leave
+                    // the switch with no branch for it, so the contract is declined instead.
+                    foreach (INamedTypeSymbol knownType in knownTypes)
+                    {
+                        if (GetAttribute(knownType, DataContractAttributeName) is null || knownType.TypeKind == TypeKind.Enum)
+                        {
+                            unsupportedReason ??= "member '" + member.Name + "' is declared as object and known type " +
+                                                  knownType.Name + " is not a data contract this generator can write";
+                            continue;
+                        }
+
+                        referenced.Add(knownType);
+                        candidates.Add(knownType.ToDisplayString(FullyQualifiedFormat));
+                    }
+                }
 
                 MemberKind elementKind = MemberKind.Unsupported;
                 string? itemName = null;
@@ -916,6 +935,10 @@ public sealed partial class DataContractSerializerGenerator
                 SpecialType.System_Char => MemberKind.Char,
                 SpecialType.System_String => MemberKind.String,
                 SpecialType.System_DateTime => MemberKind.DateTime,
+
+                // Declared as object, so the runtime type decides everything and has to be written
+                // out as i:type. Nullable<object> does not exist, so no guard is needed here.
+                SpecialType.System_Object => MemberKind.Object,
                 _ => MemberKind.Unsupported
             };
 

@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | In progress. Nested contract members and inheritance, then enums, then arrays and `List<T>` of primitives, then `IsReference`. **49 of 76** corpus cases byte-match; the rest report unsupported and skip. |
-| **M4+ — deferred** | `object` members and `[KnownType]`/`i:type` (the largest remaining blocker, 7 contracts), `[Serializable]`, `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, `ReadObject`, and the seam gaps below. |
+| **M3 — capability by capability** | In progress. Nested contract members and inheritance, then enums, then arrays and `List<T>` of primitives, then `IsReference`, then `[KnownType]`/`i:type` and `object` members. **61 of 77** corpus cases byte-match; the rest report unsupported and skip. |
+| **M4+ — deferred** | `[Serializable]`, `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, implicit (no-attribute) contracts, `[KnownType]` naming a method, `ReadObject`, and the seam gaps below. |
 
 ## What the switch does
 
@@ -179,6 +179,29 @@ net472, where the generator never runs — falling back to reflection with no `#
 Residual: on net472 the generated tests must report every case *unsupported*, not silently pass. A
 pass because nothing ran looks identical to a pass because everything matched.
 
+### 1a. A corpus case only tests the generator if the context lists its type
+
+`SanityPrimitiveArrays` was added with the collections work and its fixture recorded, but the type
+was never added to `GeneratedCorpusContext`. `GetSerializer` therefore returned null for it and
+`GeneratedGoldenRecordTests` skipped it, with a skip reason that read exactly like every legitimately
+unsupported case. The collections work looked verified and was not.
+
+Worse, when the type was finally registered the generated code **did not compile**: `ulong` members
+emitted `writer.WriteValue(value)`, which is ambiguous rather than missing, because ulong converts
+implicitly to float, double and decimal and to none of them better than the others. Upstream avoids
+it in `XmlWriterDelegator.WriteUnsignedLong` by going through `WriteRaw(XmlConvert.ToString(value))`
+- a fourth `WriteRaw` case alongside Guid and TimeSpan.
+
+Two things to keep in mind, neither of which the harness can currently catch on its own:
+
+- **Registering a type in the corpus catalog is half the job.** Adding it to the context is the other
+  half, and nothing fails if it is forgotten. A test asserting that every catalogued case's contract
+  type appears in the context would close this, and should be written.
+- **A compile error in generated code can present as csc exiting 1 with no diagnostic at all.**
+  Building with `-p:EmitCompilerGeneratedFiles=true` made the same compilation succeed, which is what
+  made the failure look like a compiler crash rather than a bug in the emitted source. When csc dies
+  silently, dump the generated file and compile it as an ordinary source to get the real error.
+
 ### 4a. A cycle without `IsReference` overflows the stack instead of throwing
 
 `DataContractSerializer` counts nesting depth and, past 512 levels, checks whether the object is
@@ -191,6 +214,18 @@ serializer also refuses, so no valid document is affected and no corpus case exe
 differs is the failure mode: a catchable `SerializationException` becomes a process-killing
 `StackOverflowException`. Cheap to close (a depth counter threaded alongside the reference scope);
 left open deliberately rather than by oversight, and worth closing before the package ships.
+
+### 4b. An `object` member holding a collection throws rather than falling back
+
+The generated switch for an `object` member covers the boxed primitives and whatever `[KnownType]`
+names. DataContractSerializer is wider than that: arrays and collections are always allowed in an
+object member without being declared. A graph that puts one there gets a `SerializationException`
+from the generated path where the reflection path succeeds.
+
+It cannot be a fallback: by the time the runtime type is known the member element is already open.
+Closing it means writing collections into an object member, which needs the collection contract
+naming rules the generator does not implement yet. `AllTypes.array1` is the corpus case waiting on
+it, though that contract is blocked on several other things too.
 
 ### 5. The seam has gaps this work does not close
 

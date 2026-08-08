@@ -240,6 +240,113 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
     }
 
     /// <summary>
+    /// One <c>object</c>-declared member per supported primitive, so the fixture records the
+    /// <c>i:type</c> name and namespace DataContractSerializer gives each.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to <see cref="SanityPrimitiveArrays"/>, and needed separately: a collection
+    /// item name and a boxed value's xsi type are not the same table. Most names come from XML
+    /// Schema, but the types XSD has no equivalent for do not, and which is which is exactly what
+    /// this fixture pins. Also carries the three shapes that are not a boxed primitive at all - a
+    /// bare object, a null, and a data contract - since each is written differently.
+    /// </remarks>
+    [DataContract]
+    [KnownType(typeof(SanityNestedNamespace))]
+    public class SanityBoxedPrimitives
+    {
+        [DataMember]
+        public object BareObject { get; set; }
+
+        [DataMember]
+        public object Boolean { get; set; }
+
+        [DataMember]
+        public object ByteArray { get; set; }
+
+        [DataMember]
+        public object Char { get; set; }
+
+        [DataMember]
+        public object Contract { get; set; }
+
+        [DataMember]
+        public object DateTime { get; set; }
+
+        [DataMember]
+        public object Decimal { get; set; }
+
+        [DataMember]
+        public object Double { get; set; }
+
+        [DataMember]
+        public object Guid { get; set; }
+
+        [DataMember]
+        public object Int16 { get; set; }
+
+        [DataMember]
+        public object Int32 { get; set; }
+
+        [DataMember]
+        public object Int64 { get; set; }
+
+        [DataMember]
+        public object Null { get; set; }
+
+        [DataMember]
+        public object SByte { get; set; }
+
+        [DataMember]
+        public object Single { get; set; }
+
+        [DataMember]
+        public object String { get; set; }
+
+        [DataMember]
+        public object TimeSpan { get; set; }
+
+        [DataMember]
+        public object UInt16 { get; set; }
+
+        [DataMember]
+        public object UInt32 { get; set; }
+
+        [DataMember]
+        public object UInt64 { get; set; }
+
+        [DataMember]
+        public object UnsignedByte { get; set; }
+
+        public static SanityBoxedPrimitives Populated()
+        {
+            return new SanityBoxedPrimitives
+            {
+                BareObject = new object(),
+                Boolean = true,
+                ByteArray = new byte[] { 7, 8 },
+                Char = 'a',
+                Contract = new SanityNestedNamespace { Inner = "nested" },
+                DateTime = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+                Decimal = 1.5m,
+                Double = 0.1d,
+                Guid = new Guid("2f9e4c1a-0000-4000-8000-000000000003"),
+                Int16 = (short)-1,
+                Int32 = 2,
+                Int64 = 3L,
+                Null = null,
+                SByte = (sbyte)-8,
+                Single = 2.5f,
+                String = "text",
+                TimeSpan = new TimeSpan(1, 2, 3),
+                UInt16 = (ushort)4,
+                UInt32 = 5u,
+                UInt64 = 6ul,
+                UnsignedByte = (byte)7
+            };
+        }
+    }
+
+    /// <summary>
     /// One array per supported primitive, so the fixture records the element name
     /// DataContractSerializer gives each. Those names are XSD-derived and not guessable with
     /// confidence - "byte" is sbyte and "unsignedByte" is byte, TimeSpan is "duration" - so the

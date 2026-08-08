@@ -37,6 +37,7 @@ public sealed partial class DataContractSerializerGenerator
         private const string SchemaInstanceNamespace = "http://www.w3.org/2001/XMLSchema-instance";
         private const string CollectionNamespace = Parser.CollectionNamespace;
         private const string SerializationNamespace = "http://schemas.microsoft.com/2003/10/Serialization/";
+        private const string SchemaNamespace = "http://www.w3.org/2001/XMLSchema";
         private const string ReferenceScope = "__ReferenceScope";
 
         private readonly StringBuilder _builder = new();
@@ -409,7 +410,8 @@ public sealed partial class DataContractSerializerGenerator
         {
             bool canBeNull = !nullAlreadyExcluded
                 && (member.IsNullableValueType
-                    || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection);
+                    || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract
+                        or MemberKind.Collection or MemberKind.Object);
 
             _builder.AppendLine($"{indentor}writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});");
 
@@ -437,7 +439,11 @@ public sealed partial class DataContractSerializerGenerator
 
             string value = member.IsNullableValueType ? access + ".Value" : access;
 
-            if (member.Kind == MemberKind.Contract && member.Candidates.Count > 0)
+            if (member.Kind == MemberKind.Object)
+            {
+                EmitObjectMember(indentor, member, value);
+            }
+            else if (member.Kind == MemberKind.Contract && member.Candidates.Count > 0)
             {
                 EmitPolymorphicMember(indentor, member, value);
             }
@@ -598,6 +604,122 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits a member declared as <c>object</c>, whose runtime type decides everything.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Three shapes are not a boxed primitive and each is written differently, which the
+        /// SanityBoxedPrimitives fixture pins: a bare <c>object</c> is anyType and writes an empty
+        /// element with no i:type at all; null is i:nil with no i:type; and a data contract writes
+        /// i:type plus its members.
+        /// </para>
+        /// <para>
+        /// The type names come from that same fixture rather than from memory. Most are XML Schema
+        /// names, but char, Guid and TimeSpan have no XSD equivalent and are named in the
+        /// serialization namespace instead - a split that is invisible until a document is compared
+        /// byte for byte.
+        /// </para>
+        /// <para>
+        /// A runtime type outside the switch throws. DataContractSerializer would accept some of
+        /// them - arrays and collections are always allowed in an object member - so this is a
+        /// narrower contract than the reflection path, recorded in the risk register.
+        /// </para>
+        /// </remarks>
+        private void EmitObjectMember(Indentor indentor, MemberSpec member, string value)
+        {
+            _builder.AppendLine($"{indentor}global::System.Type __runtimeType = {value}.GetType();");
+            _builder.AppendLine($"{indentor}if (__runtimeType == typeof(object))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}// anyType: neither i:type nor content");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+
+            foreach ((string clrType, MemberKind kind, string xsiName, string xsiNamespace) in BoxedPrimitives)
+            {
+                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({clrType}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitXsiType(indentor, xsiName, xsiNamespace);
+                _builder.AppendLine($"{indentor}{WriteValueStatement(kind, $"(({clrType}){value})")}");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            foreach (string candidate in member.Candidates)
+            {
+                ContractSpec spec = _contractSpecs[candidate];
+
+                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({candidate}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitXsiType(indentor, spec.ContractName, spec.ContractNamespace);
+
+                string typed = $"(({candidate}){value})";
+
+                if (spec.IsReference)
+                {
+                    _builder.AppendLine($"{indentor}if (!scope.WriteIdOrRef(writer, {value}))");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                    _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                }
+                else
+                {
+                    _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+                }
+
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Type '\" + __runtimeType.FullName + \"' cannot be written into an object member by this contract.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// The CLR type, writer and xsi type name of every primitive a boxed value may be.
+        /// </summary>
+        /// <remarks>
+        /// Recorded from the SanityBoxedPrimitives fixture. Two things it settles that guesswork
+        /// gets wrong: sbyte is "byte" while byte is "unsignedByte", and char, Guid and TimeSpan are
+        /// named in the serialization namespace because XML Schema has nothing to call them.
+        /// </remarks>
+        private static IEnumerable<(string ClrType, MemberKind Kind, string XsiName, string XsiNamespace)> BoxedPrimitives
+        {
+            get
+            {
+                yield return ("bool", MemberKind.Boolean, "boolean", SchemaNamespace);
+                yield return ("byte[]", MemberKind.ByteArray, "base64Binary", SchemaNamespace);
+                yield return ("char", MemberKind.Char, "char", SerializationNamespace);
+                yield return ("global::System.DateTime", MemberKind.DateTime, "dateTime", SchemaNamespace);
+                yield return ("decimal", MemberKind.Decimal, "decimal", SchemaNamespace);
+                yield return ("double", MemberKind.Double, "double", SchemaNamespace);
+                yield return ("float", MemberKind.Single, "float", SchemaNamespace);
+                yield return ("global::System.Guid", MemberKind.Guid, "guid", SerializationNamespace);
+                yield return ("short", MemberKind.Int16, "short", SchemaNamespace);
+                yield return ("int", MemberKind.Int32, "int", SchemaNamespace);
+                yield return ("long", MemberKind.Int64, "long", SchemaNamespace);
+                yield return ("sbyte", MemberKind.SByte, "byte", SchemaNamespace);
+                yield return ("string", MemberKind.String, "string", SchemaNamespace);
+                yield return ("global::System.TimeSpan", MemberKind.TimeSpan, "duration", SerializationNamespace);
+                yield return ("ushort", MemberKind.UInt16, "unsignedShort", SchemaNamespace);
+                yield return ("uint", MemberKind.UInt32, "unsignedInt", SchemaNamespace);
+                yield return ("ulong", MemberKind.UInt64, "unsignedLong", SchemaNamespace);
+                yield return ("byte", MemberKind.Byte, "unsignedByte", SchemaNamespace);
+            }
+        }
+
+        /// <summary>
         /// Emits the <c>i:type</c> attribute naming a contract.
         /// </summary>
         /// <remarks>
@@ -607,11 +729,14 @@ public sealed partial class DataContractSerializerGenerator
         /// contract in the root's own namespace reads "a:Derived" and adds no declaration, while one
         /// in a different namespace brings its own xmlns with it.
         /// </remarks>
-        private void EmitXsiType(Indentor indentor, ContractSpec contract)
+        private void EmitXsiType(Indentor indentor, ContractSpec contract) =>
+            EmitXsiType(indentor, contract.ContractName, contract.ContractNamespace);
+
+        private void EmitXsiType(Indentor indentor, string name, string ns)
         {
-            _builder.AppendLine($"{indentor}writer.WriteXmlnsAttribute(null, {Literal(contract.ContractNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteXmlnsAttribute(null, {Literal(ns)});");
             _builder.AppendLine($"{indentor}writer.WriteStartAttribute(\"i\", \"type\", {Literal(SchemaInstanceNamespace)});");
-            _builder.AppendLine($"{indentor}writer.WriteQualifiedName({Literal(contract.ContractName)}, {Literal(contract.ContractNamespace)});");
+            _builder.AppendLine($"{indentor}writer.WriteQualifiedName({Literal(name)}, {Literal(ns)});");
             _builder.AppendLine($"{indentor}writer.WriteEndAttribute();");
         }
 
@@ -620,14 +745,19 @@ public sealed partial class DataContractSerializerGenerator
         /// </summary>
         /// <remarks>
         /// Every case here matches XmlWriterDelegator in dotnet/runtime. The non-obvious ones:
-        /// char is written as its numeric value, not as a character; Guid and TimeSpan go through
-        /// WriteRaw because XmlWriter has no WriteValue overload for them; byte[] is base64.
+        /// char is written as its numeric value, not as a character; Guid, TimeSpan and ulong go
+        /// through WriteRaw because XmlWriter has no WriteValue overload for them; byte[] is base64.
+        /// ulong is the one that bites quietly - WriteValue(ulong) is not missing so much as
+        /// ambiguous, since ulong converts implicitly to float, double and decimal and to none of
+        /// them better than the others, so the mistake surfaces as CS0121 in generated code rather
+        /// than as wrong output.
         /// </remarks>
         private static string WriteValueStatement(MemberKind kind, string value) => kind switch
         {
             MemberKind.Char => $"writer.WriteValue((int){value});",
             MemberKind.Guid => $"writer.WriteRaw({value}.ToString());",
             MemberKind.TimeSpan => $"writer.WriteRaw({XmlConvert}.ToString({value}));",
+            MemberKind.UInt64 => $"writer.WriteRaw({XmlConvert}.ToString({value}));",
             MemberKind.ByteArray => $"writer.WriteBase64({value}, 0, {value}.Length);",
             _ => $"writer.WriteValue({value});"
         };
@@ -645,7 +775,8 @@ public sealed partial class DataContractSerializerGenerator
 
             return member.Kind switch
             {
-                MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection => $"{access} == null",
+                MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection
+                    or MemberKind.Object => $"{access} == null",
                 MemberKind.Boolean => $"!{access}",
                 _ => $"{access} == default"
             };

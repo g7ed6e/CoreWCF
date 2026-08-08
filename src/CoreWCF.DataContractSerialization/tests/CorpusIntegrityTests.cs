@@ -60,6 +60,34 @@ namespace CoreWCF.DataContractSerialization.Tests
         }
 
         [Fact]
+        public void EveryCasesContractTypeIsListedInTheGeneratedContext()
+        {
+            // Registering a case in the catalog is only half of adding it: unless the type is also
+            // listed on GeneratedCorpusContext, GetSerializer returns null for it and the generated
+            // half of the harness skips it - with a reason indistinguishable from a legitimately
+            // unsupported case. SanityPrimitiveArrays sat like that for a whole milestone, so the
+            // collections work read as verified when the generator had never run on it.
+            HashSet<Type> listed = new HashSet<Type>(
+                typeof(GeneratedCorpusContext)
+                    .GetCustomAttributes<DataContractSerializableAttribute>(inherit: false)
+                    .Select(a => a.Type));
+
+            List<string> missing = CorpusCatalog.Cases
+                .Select(c => c.ContractType)
+                .Distinct()
+                .Where(t => !listed.Contains(t))
+                .Select(t => t.FullName)
+                .OrderBy(n => n, StringComparer.Ordinal)
+                .ToList();
+
+            Assert.True(
+                missing.Count == 0,
+                "Every catalogued case's contract type must be listed on GeneratedCorpusContext, or the " +
+                "generated serializer is never exercised for it. Missing:" + Environment.NewLine + "  " +
+                string.Join(Environment.NewLine + "  ", missing));
+        }
+
+        [Fact]
         public void CaseIdsAreUnique()
         {
             List<string> duplicates = CorpusCatalog.Cases

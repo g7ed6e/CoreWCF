@@ -139,6 +139,15 @@ public sealed partial class DataContractSerializerGenerator
         ByteArray,
         Contract,
         Enum,
-        Collection
+        Collection,
+
+        /// <summary>
+        /// A member declared as <c>object</c>, whose runtime type is announced with <c>i:type</c>.
+        /// </summary>
+        /// <remarks>
+        /// Unlike <see cref="Contract"/> the declared type constrains nothing, so the candidates are
+        /// every boxed primitive plus whatever <c>[KnownType]</c> names.
+        /// </remarks>
+        Object
     }
 }

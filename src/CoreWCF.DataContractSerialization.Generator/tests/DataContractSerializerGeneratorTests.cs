@@ -707,6 +707,93 @@ namespace App
         }
 
         [Fact]
+        public void UnsignedLongMember_GoesThroughWriteRaw()
+        {
+            // XmlWriter has no WriteValue(ulong): ulong converts implicitly to float, double and
+            // decimal and to none of them better than the others, so WriteValue(ulong) is ambiguous
+            // rather than missing. The mistake surfaces as CS0121 in generated code, which the
+            // compiler reported by exiting without a diagnostic - so AssertCompiles is the test that
+            // matters here as much as the string assertions.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Counts
+    {
+        [DataMember] public ulong Total { get; set; }
+        [DataMember] public ulong[] Buckets { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Counts))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteRaw(global::System.Xml.XmlConvert.ToString(value.Total));", result.SingleSource);
+            Assert.Contains("writer.WriteRaw(global::System.Xml.XmlConvert.ToString(item));", result.SingleSource);
+        }
+
+        [Fact]
+        public void ObjectMember_WritesTheRuntimeTypeAsAnXsiType()
+        {
+            // object constrains nothing, so the runtime type decides the element's type, its value
+            // and its namespace. char, Guid and TimeSpan are named in the serialization namespace
+            // rather than XML Schema, which has no equivalent for them - a split that is invisible
+            // until a document is compared byte for byte.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public object Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteQualifiedName(\"boolean\", \"http://www.w3.org/2001/XMLSchema\")", result.SingleSource);
+            Assert.Contains("writer.WriteQualifiedName(\"char\", \"http://schemas.microsoft.com/2003/10/Serialization/\")", result.SingleSource);
+            Assert.Contains("writer.WriteQualifiedName(\"duration\", \"http://schemas.microsoft.com/2003/10/Serialization/\")", result.SingleSource);
+
+            // sbyte is "byte" and byte is "unsignedByte" - the reverse of the obvious guess.
+            Assert.Contains("__runtimeType == typeof(sbyte)", result.SingleSource);
+            Assert.Contains("writer.WriteQualifiedName(\"unsignedByte\", \"http://www.w3.org/2001/XMLSchema\")", result.SingleSource);
+
+            // A bare object is anyType: an empty element with no i:type at all.
+            Assert.Contains("// anyType: neither i:type nor content", result.SingleSource);
+        }
+
+        [Fact]
+        public void ObjectMemberWithAnEnumKnownType_LeavesTheContractToReflection()
+        {
+            // Every known type in scope is a candidate for an object member. An enum is not a
+            // contract this generator can write into that position, so leaving it out would give the
+            // switch no branch for a value the real serializer accepts.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    public enum Colour { Red }
+
+    [DataContract]
+    [KnownType(typeof(Colour))]
+    public class Holder
+    {
+        [DataMember] public object Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("known type Colour is not a data contract", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.Holder))", result.SingleSource);
+        }
+
+        [Fact]
         public void IsReferenceOnAValueType_LeavesTheContractToReflection()
         {
             // A struct has no identity to preserve, and DataContractSerializer rejects the
