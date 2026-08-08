@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **77 of 82** corpus cases byte-match; the five that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **41 of 82** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Everything except object identity and polymorphism: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset`, `XmlQualifiedName`, `DateOnly` and `TimeOnly`. See "The read algorithm" below for what stays unreadable and why. |
+| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **80 of 85** corpus cases byte-match; the five that skip are all deliberate exclusions. |
+| **M4 — `ReadObject`** | In progress. **45 of 85** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Everything except object identity and boxed members: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset`, `XmlQualifiedName`, `DateOnly`, `TimeOnly` and `i:type` polymorphism. See "The read algorithm" below for what stays unreadable and why. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -302,6 +302,41 @@ Because the branch is a run-time test rather than a compile-time one, **one test
 halves**: `SanityDateAndTimeOnly` round-trips on net8.0 and net9.0 against the lost-value fixture and
 on net10.0 against the primitive one.
 
+### Resolving an `i:type` is not the inverse of announcing one
+
+Announcing is a switch on the runtime type. Resolving is a lookup by name, and the candidate set is
+the compile-time known-types closure - so what the serializer does through reflection is a chain of
+string comparisons in generated code. Following
+`XmlObjectSerializerReadContext`:
+
+- **No `i:type` means the declared contract.** The writer omits it for the declared type, so the
+  absent name and the declared name share one branch.
+- **A name that resolves to nothing throws**, as `DcTypeNotFoundOnDeserialize` does. Falling back to
+  the declared contract would produce an instance missing every member the derived one adds, and
+  report success.
+- The attribute is read while the reader still sits on the element, because the prefix it uses is
+  declared there - the same constraint `QName` has.
+
+#### The root decides for itself, in both directions
+
+A root has no member to carry the decision, so it makes it itself. Adding the read side exposed that
+the **write** side never had one: `WriteObject` cast the graph to the declared contract, so a service
+returning a derived instance through a base-typed contract wrote only the base members, with no
+`i:type` and no error. That is the silent-data-loss failure this project exists to prevent, and it
+was present on the write path independently of any of the read work.
+
+`SanityBase.derived-instance` now pins it. The recorded document puts `i:type` ahead of the namespace
+declarations and reuses the prefix already bound to the contract namespace rather than declaring a
+second one - a member element declares its own, a root does not:
+
+```xml
+<Root i:type="a:SanityFurtherDerived" xmlns="http://tempuri.org/" xmlns:a="..." xmlns:i="...">
+```
+
+`SanityPolymorphic` covers the member side with all four shapes at once, because a single derived
+instance cannot tell "resolved the name" from "took the only branch": a declared instance carrying no
+`i:type`, two different derived types carrying different ones, and a null carrying none.
+
 ### What stays unreadable, and why
 
 A contract is readable only if every contract it reaches is - it is a graph question, computed with
@@ -310,8 +345,7 @@ terminates at run time on a nil or empty element rather than statically.
 
 | Not read | Reason |
 | --- | --- |
-| Polymorphic members, boxed members | Resolving an `i:type` back to a type is a different problem from announcing one. A member that may hold more than its declared contract would otherwise read as its declared type and silently lose the derived members. |
-| A contract that names a descendant in its `[KnownType]` closure | Same failure, at the root, where there is no member to carry the decline. Merely *having* a descendant is not enough: one this contract never names is one the reflection reader would refuse outright, so declining for it would cost coverage and buy no safety. |
+| Boxed members - `object`, `ValueType`, `Enum`, `Array` | The candidates are not all contracts. A primitive in an `object` member is announced by an XSD name with no contract behind it, so resolving one needs a second table keyed by those names - the inverse of the `BoxedPrimitives` table the writer uses. |
 | `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 

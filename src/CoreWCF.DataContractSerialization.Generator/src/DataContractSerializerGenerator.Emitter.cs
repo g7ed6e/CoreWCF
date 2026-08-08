@@ -96,6 +96,7 @@ public sealed partial class DataContractSerializerGenerator
             EmitDateTimeOffsetReadHelper(indentor);
             EmitQNameHelper(indentor);
             EmitQNameReadHelper(indentor);
+            EmitXsiTypeReadHelper(indentor);
             EmitDateOnlyHelpers(indentor);
             EmitReadHelpers(indentor);
             EmitAnyTypeHelper(indentor);
@@ -310,19 +311,50 @@ public sealed partial class DataContractSerializerGenerator
             // reference-preserving contract in it pays nothing but the empty object.
             _builder.AppendLine($"{indentor}{ReferenceScope} scope = new {ReferenceScope}();");
 
-            if (contract.IsReference)
-            {
-                // The root is by definition the first sight of this instance, so this always writes
-                // z:Id and never z:Ref - but it goes through the same path so that the id counter
-                // sees it, which is what makes the root i1 and the first member i2.
-                // It is written after the xmlns declarations because that is where
-                // OnHandleIsReference sits relative to HandleGraphAtTopLevel in dotnet/runtime; the
-                // writer emits attributes ahead of namespace declarations, which is what puts z:Id
-                // first in the output.
-                _builder.AppendLine($"{indentor}scope.WriteIdOrRef(writer, graph);");
-            }
+            // The root can hold a derived contract just as a member can, and it has no member to
+            // carry the decision. Without this the graph would be written through the declared
+            // contract's writer, dropping every member the derived one adds and reporting success.
+            EquatableArray<string> rootCandidates = DerivedCandidates(contract);
 
-            _builder.AppendLine($"{indentor}{ContentWriterName(contract)}(writer, ({contract.FullyQualifiedName})graph, scope);");
+            if (rootCandidates.Count > 0)
+            {
+                _builder.AppendLine($"{indentor}global::System.Type __runtimeType = graph.GetType();");
+                _builder.AppendLine();
+                _builder.AppendLine($"{indentor}if (__runtimeType == typeof({contract.FullyQualifiedName}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitRootContentCall(indentor, contract, contract);
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+
+                foreach (string candidate in rootCandidates)
+                {
+                    ContractSpec spec = _contractSpecs[candidate];
+
+                    _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({candidate}))");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                    EmitXsiType(indentor, spec);
+                    EmitRootContentCall(indentor, spec, contract);
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                }
+
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}\"Type '\" + __runtimeType + \"' with data contract name '\" + __runtimeType.Name +");
+                _builder.AppendLine($"{indentor}\"' is not expected. Add any types not known statically to the list of known types.\");");
+                indentor.Decrement();
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+            else
+            {
+                EmitRootContentCall(indentor, contract, contract);
+            }
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
             _builder.AppendLine();
@@ -338,6 +370,27 @@ public sealed partial class DataContractSerializerGenerator
 
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the root's call into a contract's content writer, with its id if it keeps one.
+        /// </summary>
+        /// <remarks>
+        /// The root is by definition the first sight of this instance, so WriteIdOrRef always writes
+        /// z:Id and never z:Ref - but it goes through the same path so that the id counter sees it,
+        /// which is what makes the root i1 and the first member i2. It comes after the xmlns
+        /// declarations because that is where OnHandleIsReference sits relative to
+        /// HandleGraphAtTopLevel in dotnet/runtime; the writer emits attributes ahead of namespace
+        /// declarations, which is what puts z:Id first in the output.
+        /// </remarks>
+        private void EmitRootContentCall(Indentor indentor, ContractSpec runtime, ContractSpec declared)
+        {
+            if (runtime.IsReference)
+            {
+                _builder.AppendLine($"{indentor}scope.WriteIdOrRef(writer, graph);");
+            }
+
+            _builder.AppendLine($"{indentor}{ContentWriterName(runtime)}(writer, ({runtime.FullyQualifiedName})graph, scope);");
         }
 
         /// <summary>
@@ -387,20 +440,23 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
             _builder.AppendLine();
-            _builder.AppendLine($"{indentor}{contract.FullyQualifiedName} result = new {contract.FullyQualifiedName}();");
+            // The root is polymorphic for the same reason a member is - a document may announce a
+            // derived contract with i:type - and it has no member to carry the decision, so it makes
+            // it here.
+            EquatableArray<string> candidates = DerivedCandidates(contract);
+
+            _builder.AppendLine($"{indentor}{contract.FullyQualifiedName} result = default;");
             _builder.AppendLine();
-            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
-            _builder.AppendLine($"{indentor}{{");
-            indentor.Increment();
-            _builder.AppendLine($"{indentor}reader.Read();");
-            _builder.AppendLine($"{indentor}return result;");
-            indentor.Decrement();
-            _builder.AppendLine($"{indentor}}}");
-            _builder.AppendLine();
-            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
-            _builder.AppendLine($"{indentor}reader.MoveToContent();");
-            _builder.AppendLine($"{indentor}{ContentReaderName(contract)}(reader, {(contract.IsValueType ? "ref " : string.Empty)}result);");
-            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+
+            if (candidates.Count > 0)
+            {
+                EmitDispatchedRead(indentor, contract, candidates, "result");
+            }
+            else
+            {
+                EmitTypedContractRead(indentor, contract, "result");
+            }
+
             _builder.AppendLine();
             _builder.AppendLine($"{indentor}return result;");
             indentor.Decrement();
@@ -1544,6 +1600,50 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits the reader for the <c>i:type</c> attribute, which names the runtime contract.
+        /// </summary>
+        /// <remarks>
+        /// Read while the reader still sits on the element, because the prefix it uses is declared
+        /// there. Absent is not an error - it means the declared contract - so this reports it as a
+        /// null name rather than throwing.
+        /// </remarks>
+        private void EmitXsiTypeReadHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void ReadXsiType({DictionaryReader} reader, out string name, out string ns)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}string __value = reader.GetAttribute(\"type\", {Literal(SchemaInstanceNamespace)});");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (__value == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}name = null;");
+            _builder.AppendLine($"{indentor}ns = null;");
+            _builder.AppendLine($"{indentor}return;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}int __colon = __value.IndexOf(':');");
+            _builder.AppendLine($"{indentor}string __prefix = __colon < 0 ? string.Empty : __value.Substring(0, __colon);");
+            _builder.AppendLine($"{indentor}ns = reader.LookupNamespace(__prefix);");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (ns == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Invalid i:type '\" + __value + \"': the prefix is not declared.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}name = __value.Substring(__colon + 1);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
         /// Emits the reader for an <c>XmlQualifiedName</c> value.
         /// </summary>
         /// <remarks>
@@ -1950,7 +2050,6 @@ public sealed partial class DataContractSerializerGenerator
         private void EmitNestedContractRead(Indentor indentor, MemberSpec member, string target)
         {
             ContractSpec nested = _contractSpecs[member.NestedContractFullyQualifiedName!];
-            string typeName = nested.FullyQualifiedName;
 
             _builder.AppendLine($"{indentor}if (IsNil(reader))");
             _builder.AppendLine($"{indentor}{{");
@@ -1962,7 +2061,34 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}else");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
-            _builder.AppendLine($"{indentor}{typeName} __nested = new {typeName}();");
+
+            if (member.Candidates.Count > 0)
+            {
+                EmitDispatchedRead(indentor, nested, member.Candidates, target);
+            }
+            else
+            {
+                EmitTypedContractRead(indentor, nested, target);
+            }
+
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the read of one contract into a target, from an element that is open but not
+        /// entered.
+        /// </summary>
+        /// <remarks>
+        /// The wire format has no second wrapping element, so the element the reader is sitting on
+        /// <em>is</em> this contract's element: open it, hand the reader to its content reader,
+        /// close it. The mirror of what the content writer does.
+        /// </remarks>
+        private void EmitTypedContractRead(Indentor indentor, ContractSpec contract, string target)
+        {
+            string typeName = contract.FullyQualifiedName;
+
+            _builder.AppendLine($"{indentor}{typeName} __typed = new {typeName}();");
             _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
@@ -1974,14 +2100,114 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Increment();
             _builder.AppendLine($"{indentor}reader.ReadStartElement();");
             _builder.AppendLine($"{indentor}reader.MoveToContent();");
-            _builder.AppendLine($"{indentor}{ContentReaderName(nested)}(reader, {(nested.IsValueType ? "ref " : string.Empty)}__nested);");
+            _builder.AppendLine($"{indentor}{ContentReaderName(contract)}(reader, {(contract.IsValueType ? "ref " : string.Empty)}__typed);");
             _builder.AppendLine($"{indentor}reader.ReadEndElement();");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
             _builder.AppendLine();
-            _builder.AppendLine($"{indentor}{target} = __nested;");
+            _builder.AppendLine($"{indentor}{target} = __typed;");
+        }
+
+        /// <summary>
+        /// Emits the read of a value whose runtime contract is announced by <c>i:type</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The inverse of EmitPolymorphicMember, and it has to resolve a name rather than announce
+        /// one. Mirrors XmlObjectSerializerReadContext: the i:type is resolved against the known
+        /// types, its absence means the declared contract, and a name that resolves to nothing
+        /// throws DcTypeNotFoundOnDeserialize rather than falling back to the declared type. Falling
+        /// back would produce an instance missing every member the derived contract adds and report
+        /// success, which is the failure this whole project exists to prevent.
+        /// </para>
+        /// <para>
+        /// The candidate set is the compile-time known-types closure, so the resolution the
+        /// serializer does through reflection is a chain of string comparisons here.
+        /// </para>
+        /// </remarks>
+        private void EmitDispatchedRead(Indentor indentor, ContractSpec declared, EquatableArray<string> candidates, string target)
+        {
+            _builder.AppendLine($"{indentor}ReadXsiType(reader, out string __typeName, out string __typeNamespace);");
+            _builder.AppendLine();
+
+            // The declared contract is both the no-i:type case and a candidate in its own right,
+            // since the writer omits i:type for it but a document from elsewhere may still name it.
+            _builder.AppendLine($"{indentor}if (__typeName == null");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}|| (__typeName == {Literal(declared.ContractName)}");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}&& __typeNamespace == {Literal(declared.ContractNamespace)}))");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            EmitTypedContractRead(indentor, declared, target);
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
+
+            foreach (string candidate in candidates)
+            {
+                ContractSpec spec = _contractSpecs[candidate];
+
+                if (string.Equals(candidate, declared.FullyQualifiedName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                _builder.AppendLine($"{indentor}else if (__typeName == {Literal(spec.ContractName)}");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}&& __typeNamespace == {Literal(spec.ContractNamespace)})");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitTypedContractRead(indentor, spec, target);
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Element contains data from a type that maps to the name '\" + __typeNamespace + \":\" + __typeName +");
+            _builder.AppendLine($"{indentor}\"'. The deserializer has no knowledge of any type that maps to this name.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>Whether a contract is announced as something else by some document it may see.</summary>
+        private EquatableArray<string> DerivedCandidates(ContractSpec contract)
+        {
+            List<string> derived = new List<string>();
+
+            foreach (string knownType in contract.KnownTypes)
+            {
+                if (!_contractSpecs.TryGetValue(knownType, out ContractSpec candidate) || !candidate.IsSupported)
+                {
+                    continue;
+                }
+
+                ContractSpec current = candidate;
+                while (current.BaseContractFullyQualifiedName is string baseName)
+                {
+                    if (string.Equals(baseName, contract.FullyQualifiedName, StringComparison.Ordinal))
+                    {
+                        derived.Add(knownType);
+                        break;
+                    }
+
+                    if (!_contractSpecs.TryGetValue(baseName, out ContractSpec baseSpec))
+                    {
+                        break;
+                    }
+
+                    current = baseSpec;
+                }
+            }
+
+            return new EquatableArray<string>(derived.ToArray());
         }
 
         /// <summary>
@@ -2216,7 +2442,7 @@ public sealed partial class DataContractSerializerGenerator
                 && contract.HasParameterlessConstructor
                 && !contract.IsReference
                 && BaseChainIsKnown(contract)
-                && !HasDerivedContract(contract);
+                && EveryDerivedContractIsReadable(contract);
 
             if (readable)
             {
@@ -2256,67 +2482,61 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
-        /// Whether a derived contract could legitimately turn up where this one is expected.
+        /// Whether every contract that could turn up in place of this one can itself be read.
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// A member typed as this contract declines already, through its Candidates. The root of a
-        /// document has no member to carry that, so the same question has to be asked of the
-        /// contract itself: reading a derived instance through its base's reader would drop every
-        /// member the derived contract adds and report success.
-        /// </para>
-        /// <para>
-        /// Merely deriving from this contract is not enough to make that possible. An i:type is
-        /// resolved against the known types, so a derived contract this one never names is one the
-        /// reflection-based reader would refuse outright - declining for it would cost coverage and
-        /// buy no safety. The test is therefore the intersection: a known type that is also a
-        /// descendant.
-        /// </para>
+        /// A document may announce a derived contract with i:type wherever this one is expected, so
+        /// reading this contract means being able to read those too. Merely deriving from it is not
+        /// enough to count: an i:type is resolved against the known types, so a descendant this
+        /// contract never names is one the reflection-based reader would refuse outright. The set is
+        /// the intersection - a known type that is also a descendant.
         /// </remarks>
-        private bool HasDerivedContract(ContractSpec contract)
+        private bool EveryDerivedContractIsReadable(ContractSpec contract)
         {
-            foreach (string knownType in contract.KnownTypes)
+            foreach (string candidate in DerivedCandidates(contract))
             {
-                if (!_contractSpecs.TryGetValue(knownType, out ContractSpec candidate))
+                if (!_contractSpecs.TryGetValue(candidate, out ContractSpec spec) || !IsReadable(spec))
                 {
-                    continue;
-                }
-
-                while (candidate.BaseContractFullyQualifiedName is string baseName)
-                {
-                    if (string.Equals(baseName, contract.FullyQualifiedName, StringComparison.Ordinal))
-                    {
-                        return true;
-                    }
-
-                    if (!_contractSpecs.TryGetValue(baseName, out ContractSpec baseSpec))
-                    {
-                        break;
-                    }
-
-                    candidate = baseSpec;
+                    return false;
                 }
             }
 
-            return false;
+            return true;
         }
 
         /// <summary>Whether one member can be read back.</summary>
         private bool IsMemberReadable(MemberSpec member)
         {
-            // Polymorphism is a write-side capability for now: resolving an i:type back to a type is
-            // a different problem from announcing one, so a member that may hold more than its
-            // declared contract is not readable.
-            if (member.Candidates.Count > 0 || member.EnumCandidates.Count > 0)
+            // A boxed member is still write-only. Its candidates are not all contracts - a primitive
+            // in an object member is announced by an XSD name with no contract behind it - so
+            // resolving one needs a second table this slice does not build.
+            if (member.EnumCandidates.Count > 0 || member.Kind == MemberKind.Object)
             {
                 return false;
             }
 
             if (member.Kind == MemberKind.Contract)
             {
-                return member.NestedContractFullyQualifiedName is string nested
-                    && _contractSpecs.TryGetValue(nested, out ContractSpec nestedSpec)
-                    && IsReadable(nestedSpec);
+                if (member.NestedContractFullyQualifiedName is not string nested
+                    || !_contractSpecs.TryGetValue(nested, out ContractSpec nestedSpec)
+                    || !IsReadable(nestedSpec))
+                {
+                    return false;
+                }
+
+                // Every contract the member may actually hold has to be readable, not just the one
+                // it is declared as - the whole point of the i:type dispatch is that the others turn
+                // up here too.
+                foreach (string candidate in member.Candidates)
+                {
+                    if (!_contractSpecs.TryGetValue(candidate, out ContractSpec candidateSpec)
+                        || !IsReadable(candidateSpec))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
             }
 
             if (member.Kind == MemberKind.Collection)

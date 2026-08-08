@@ -531,11 +531,12 @@ namespace App
         }
 
         [Fact]
-        public void BaseContractNamingItsDerivedTypes_IsNotRead()
+        public void BaseContractNamingItsDerivedTypes_DispatchesOnTheXsiType()
         {
-            // A document can legitimately carry an i:type here, so reading it through the base's
-            // reader would drop every member the derived contract adds and report success. The
-            // derived contract has no such problem and still reads.
+            // Reading a document through the base's reader alone would drop every member the derived
+            // contract adds and report success, so the name is resolved instead. Both directions are
+            // here: the root announces the runtime contract on the way out and resolves it on the
+            // way back in.
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"
     [DataContract]
     [KnownType(typeof(DerivedContract))]
@@ -559,10 +560,58 @@ namespace App
 
             AssertCompiles(result);
 
-            // Two serializers are emitted, and exactly one of them claims to read.
+            // Both serializers read now, because the base can tell the two apart.
             Assert.Equal(
-                1,
+                2,
                 result.SingleSource.Split(new[] { "CanReadObject => true" }, StringSplitOptions.None).Length - 1);
+
+            // Out: the root branches on the runtime type and announces anything but the declared one.
+            Assert.Contains("global::System.Type __runtimeType = graph.GetType();", result.SingleSource);
+            Assert.Contains("__runtimeType == typeof(global::App.DerivedContract)", result.SingleSource);
+
+            // In: the i:type is resolved by name, and a name that resolves to nothing throws rather
+            // than falling back to the declared contract.
+            Assert.Contains("ReadXsiType(reader, out string __typeName, out string __typeNamespace);", result.SingleSource);
+            Assert.Contains("__typeName == \"DerivedContract\"", result.SingleSource);
+            Assert.Contains("The deserializer has no knowledge of any type that maps to this name.", result.SingleSource);
+        }
+
+        [Fact]
+        public void PolymorphicMember_ReadsEachCandidateAndDefaultsToTheDeclaredContract()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    [KnownType(typeof(DerivedContract))]
+    public class BaseContract
+    {
+        [DataMember] public int Zulu { get; set; }
+    }
+
+    [DataContract]
+    public class DerivedContract : BaseContract
+    {
+        [DataMember] public int Alpha { get; set; }
+    }
+
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public BaseContract Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // No i:type means the declared contract - the writer omits it for exactly that case - so
+            // the absent name and the declared name share one branch.
+            Assert.Contains("if (__typeName == null", result.SingleSource);
+            Assert.Contains("|| (__typeName == \"BaseContract\"", result.SingleSource);
+            Assert.Contains("else if (__typeName == \"DerivedContract\"", result.SingleSource);
         }
 
         [Fact]

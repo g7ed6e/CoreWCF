@@ -71,7 +71,22 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
             // Registered indirectly: SanityBase is only ever serialized through SanityKnownTypeHolder,
             // and SanityNestedNamespace through SanityCustomNaming / SanityNullable. Both are covered
             // as member types rather than as roots.
-            builder.Skip<SanityBase>("Covered as the declared member type of SanityKnownTypeHolder.");
+            // Registered as roots in their own right, because a root has no member to carry an
+            // i:type and so decides for itself: the declared type writes none, a derived instance
+            // writes one.
+            builder.Add<SanityBase>("base-instance", () => new SanityBase { BaseMember = "plain", BaseOrdinal = 7 })
+                   .WithKnownTypes(typeof(SanityDerived), typeof(SanityFurtherDerived))
+                   .WithTags("knowntype", "polymorphism");
+
+            builder.Add<SanityBase>("derived-instance", () => SanityFurtherDerived.Populated())
+                   .WithKnownTypes(typeof(SanityDerived), typeof(SanityFurtherDerived))
+                   .WithTags("knowntype", "polymorphism");
+
+            builder.Add<SanityPolymorphic>("populated", SanityPolymorphic.Populated)
+                   .WithKnownTypes(typeof(SanityDerived), typeof(SanityFurtherDerived))
+                   .WithTags("knowntype", "polymorphism", "inheritance");
+
+            builder.Skip<SanityFurtherDerived>("Covered through SanityBase and SanityPolymorphic.");
             builder.Skip<SanityNestedNamespace>("Covered as a member type of SanityCustomNaming and SanityNullable.");
             builder.Skip<SanityRenamedEnum>("Enum contract covered as a member of SanityEnums.");
         }

@@ -46,6 +46,9 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
     [DataContractSerializable(typeof(SanityQualifiedNames))]
     [DataContractSerializable(typeof(SanityNullable))]
     [DataContractSerializable(typeof(SanityDerived))]
+    [DataContractSerializable(typeof(SanityFurtherDerived))]
+    [DataContractSerializable(typeof(SanityBase))]
+    [DataContractSerializable(typeof(SanityPolymorphic))]
     [DataContractSerializable(typeof(SanityKnownTypeHolder))]
     [DataContractSerializable(typeof(SanityReferenceNode))]
 

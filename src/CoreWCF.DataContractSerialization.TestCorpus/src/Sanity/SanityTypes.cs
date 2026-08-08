@@ -169,6 +169,7 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
     /// <summary>Base of the inheritance pair. Base members are emitted before derived members.</summary>
     [DataContract]
     [KnownType(typeof(SanityDerived))]
+    [KnownType(typeof(SanityFurtherDerived))]
     public class SanityBase
     {
         [DataMember]
@@ -192,6 +193,60 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
                 BaseMember = "base",
                 BaseOrdinal = 1,
                 DerivedMember = "derived"
+            };
+        }
+    }
+
+    /// <summary>Second level of the chain, so an i:type has more than one candidate to resolve against.</summary>
+    [DataContract]
+    public class SanityFurtherDerived : SanityDerived
+    {
+        [DataMember]
+        public int FurtherOrdinal { get; set; }
+
+        public static SanityFurtherDerived Populated()
+        {
+            return new SanityFurtherDerived
+            {
+                BaseMember = "base",
+                BaseOrdinal = 1,
+                DerivedMember = "derived",
+                FurtherOrdinal = 2
+            };
+        }
+    }
+
+    /// <summary>
+    /// One member declared as the base, holding each of the shapes an i:type has to tell apart.
+    /// </summary>
+    /// <remarks>
+    /// A single derived instance does not exercise a dispatch: it cannot tell "resolved the name"
+    /// from "took the only branch". Here the declared type carries no i:type at all, two different
+    /// derived types carry different ones, and a null carries none - four different documents.
+    /// </remarks>
+    [DataContract]
+    public class SanityPolymorphic
+    {
+        [DataMember]
+        public SanityBase AsDeclared { get; set; }
+
+        [DataMember]
+        public SanityBase AsDerived { get; set; }
+
+        [DataMember]
+        public SanityBase AsFurtherDerived { get; set; }
+
+        [DataMember]
+        public SanityBase Missing { get; set; }
+
+        public static SanityPolymorphic Populated()
+        {
+            return new SanityPolymorphic
+            {
+                AsDeclared = new SanityBase { BaseMember = "plain", BaseOrdinal = 7 },
+                AsDerived = SanityDerived.Populated(),
+                AsFurtherDerived = SanityFurtherDerived.Populated(),
+                Missing = null
             };
         }
     }
