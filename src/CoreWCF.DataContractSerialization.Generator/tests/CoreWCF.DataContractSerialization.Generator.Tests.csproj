@@ -1,6 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk" ToolsVersion="15.0">
   <PropertyGroup>
-    <TargetFrameworks>$(TestTargetFrameworks)</TargetFrameworks>
+    <!-- Deliberately not net472. These tests compile the emitted code, and the emitter is entitled
+         to use net6+ types - DateOnly, TimeOnly, ReferenceEqualityComparer - because
+         CoreWCF.DataContractSerialization.targets gates the generator off below net8.0. Compiling
+         its output against net472 reference assemblies therefore tests a combination that cannot
+         occur. That the generator contributes nothing on net472 is verified where it is actually
+         observable: CoreWCF.DataContractSerialization.Tests still runs there and reports every case
+         unsupported. -->
+    <!-- Unescape because a property function escapes the semicolons in its result, which would
+         leave a single target framework literally named "net8.0;net9.0;net10.0". -->
+    <TargetFrameworks>$([MSBuild]::Unescape($(TestTargetFrameworks.Replace(';net472', ''))))</TargetFrameworks>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
     <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>

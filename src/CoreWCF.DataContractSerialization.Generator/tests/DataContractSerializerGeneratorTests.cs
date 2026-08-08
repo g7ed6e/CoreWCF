@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -290,6 +290,86 @@ namespace App
             int alpha = result.SingleSource.IndexOf("\"Alpha\"", StringComparison.Ordinal);
             int zulu = result.SingleSource.IndexOf("\"Zulu\"", StringComparison.Ordinal);
             Assert.True(delegation > 0 && alpha > 0 && zulu > 0, "Both contracts should be emitted.");
+        }
+
+        [Fact]
+        public void DerivedContract_ReadsAFlattenedMemberListBaseFirst()
+        {
+            // The writer recurses, one call per level. The reader cannot: it is one loop over one
+            // monotonically advancing index, and a per-level loop would let the base's loop swallow
+            // the derived members as elements it does not recognise. Upstream draws the same
+            // distinction - ReflectionGetMembers flattens the chain base-first.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(Namespace = ""http://base"")]
+    public class BaseContract
+    {
+        [DataMember] public int Zulu { get; set; }
+    }
+
+    [DataContract(Namespace = ""http://derived"")]
+    public class DerivedContract : BaseContract
+    {
+        [DataMember] public int Alpha { get; set; }
+    }
+
+    [DataContractSerializable(typeof(DerivedContract))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // The derived contract's reader is the only one with a second member to match.
+            string derivedReader = result.SingleSource
+                .Split(new[] { "private static void __ReadContent" }, StringSplitOptions.None)
+                .Single(chunk => chunk.Contains("__matched < 1"));
+
+            Assert.True(
+                derivedReader.IndexOf("\"Zulu\"", StringComparison.Ordinal)
+                    < derivedReader.IndexOf("\"Alpha\"", StringComparison.Ordinal),
+                "The inherited member should be matched before the derived one.");
+
+            // And it keeps the namespace of the contract that declares it, which is how
+            // ClassDataContract builds MemberNamespaces - copying the base's entries before
+            // appending its own.
+            Assert.Contains("reader.NamespaceURI == \"http://base\"", derivedReader);
+            Assert.Contains("reader.NamespaceURI == \"http://derived\"", derivedReader);
+        }
+
+        [Fact]
+        public void BaseContractNamingItsDerivedTypes_IsNotRead()
+        {
+            // A document can legitimately carry an i:type here, so reading it through the base's
+            // reader would drop every member the derived contract adds and report success. The
+            // derived contract has no such problem and still reads.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    [KnownType(typeof(DerivedContract))]
+    public class BaseContract
+    {
+        [DataMember] public int Zulu { get; set; }
+    }
+
+    [DataContract]
+    public class DerivedContract : BaseContract
+    {
+        [DataMember] public int Alpha { get; set; }
+    }
+
+    [DataContractSerializable(typeof(BaseContract))]
+    [DataContractSerializable(typeof(DerivedContract))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // Two serializers are emitted, and exactly one of them claims to read.
+            Assert.Equal(
+                1,
+                result.SingleSource.Split(new[] { "CanReadObject => true" }, StringSplitOptions.None).Length - 1);
         }
 
         [Fact]

@@ -20,7 +20,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
 | **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **74 of 80** corpus cases byte-match; the six that skip are all deliberate exclusions. |
-| **M4+ — deferred** | `ReadObject` and the seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
+| **M4 — `ReadObject`** | In progress. **29 of 79** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer: flat contracts of built-in members, nested contracts, collections, and inheritance. See "The read algorithm" below for what stays unreadable and why. |
+| **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
 
@@ -170,6 +171,64 @@ The `z` prefix is never declared by the generator. Writing an attribute in the s
 namespace makes the writer declare it wherever it first comes into scope, which reproduces both
 fixture shapes on its own: `xmlns:z` on the root when the root contract is `IsReference`, and on the
 member element when only a nested contract is.
+
+---
+
+## The read algorithm, as it actually is
+
+`ReadObject` is not the write algorithm run backwards. Two rules differ, and both come from
+dotnet/runtime rather than from the fixtures.
+
+### Members are flattened base-first, not read one level at a time
+
+The writer recurses, one call per level of the base chain, because writing is unconditional.
+`ReflectionGetMembers` shows the reader cannot:
+
+```csharp
+protected static int ReflectionGetMembers(ClassDataContract classContract, DataMember[] members)
+{
+    int memberCount = (classContract.BaseClassContract == null) ? 0 :
+        ReflectionGetMembers(classContract.BaseClassContract, members);
+    ...
+}
+```
+
+Base members fill the array first, then the derived ones, and `ReflectionReadMembers` is a single
+loop over that flat array with one monotonically advancing index. A per-level loop would let the
+base's own loop reach a derived member, fail to recognise it, and skip it in silence - the members
+would vanish and the read would report success.
+
+`ClassDataContract` builds the matching namespace array by copying rather than recomputing:
+
+```csharp
+Array.Copy(BaseClassContract.MemberNamespaces!, MemberNamespaces, baseMemberCount);
+...
+MemberNamespaces[i + baseMemberCount] = Namespace;
+```
+
+So **an inherited member is matched against the namespace of the contract that declares it**, not
+the derived contract's. The generator flattens the same way, in `FlattenedMembers`.
+
+### An empty collection and a null one are different documents
+
+An empty element yields an empty collection; only `i:nil` yields null. Getting that backwards is
+invisible until something round-trips, which is what the read oracle is for: it reads with the
+generated serializer and writes back with the **reflection** one, so any difference in the recovered
+graph shows up as a byte difference against the recorded fixture.
+
+### What stays unreadable, and why
+
+A contract is readable only if every contract it reaches is - it is a graph question, computed with
+memoisation, where a contract that reaches itself is assumed readable because the recursion
+terminates at run time on a nil or empty element rather than statically.
+
+| Not read | Reason |
+| --- | --- |
+| Polymorphic members, boxed members | Resolving an `i:type` back to a type is a different problem from announcing one. A member that may hold more than its declared contract would otherwise read as its declared type and silently lose the derived members. |
+| A contract that names a descendant in its `[KnownType]` closure | Same failure, at the root, where there is no member to carry the decline. Merely *having* a descendant is not enough: one this contract never names is one the reflection reader would refuse outright, so declining for it would cost coverage and buy no safety. |
+| `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
+| Enums, dictionaries, `DateTimeOffset`, `QName`, `DateOnly`/`TimeOnly` | One inverse each; not yet written. |
+| Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 
 ---
 

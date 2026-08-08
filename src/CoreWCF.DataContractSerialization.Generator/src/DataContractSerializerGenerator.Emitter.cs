@@ -1474,19 +1474,21 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}private static void {ContentReaderName(contract)}({DictionaryReader} reader, {(contract.IsValueType ? "ref " : string.Empty)}{contract.FullyQualifiedName} value)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
+            List<(MemberSpec Member, string Namespace)> members = FlattenedMembers(contract);
+
             _builder.AppendLine($"{indentor}int __matched = -1;");
             _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
 
             int index = 0;
-            foreach (MemberSpec member in contract.Members)
+            foreach ((MemberSpec member, string memberNamespace) in members)
             {
                 string keyword = index == 0 ? "if" : "else if";
                 _builder.AppendLine($"{indentor}{keyword} (__matched < {index}");
                 indentor.Increment();
                 _builder.AppendLine($"{indentor}&& reader.LocalName == {Literal(member.Name)}");
-                _builder.AppendLine($"{indentor}&& reader.NamespaceURI == {Literal(contract.ContractNamespace)})");
+                _builder.AppendLine($"{indentor}&& reader.NamespaceURI == {Literal(memberNamespace)})");
                 indentor.Decrement();
                 _builder.AppendLine($"{indentor}{{");
                 indentor.Increment();
@@ -1497,7 +1499,7 @@ public sealed partial class DataContractSerializerGenerator
                 index++;
             }
 
-            if (contract.Members.Count > 0)
+            if (members.Count > 0)
             {
                 _builder.AppendLine($"{indentor}else");
                 _builder.AppendLine($"{indentor}{{");
@@ -1509,7 +1511,7 @@ public sealed partial class DataContractSerializerGenerator
             // not know about without the read failing.
             _builder.AppendLine($"{indentor}reader.Skip();");
 
-            if (contract.Members.Count > 0)
+            if (members.Count > 0)
             {
                 indentor.Decrement();
                 _builder.AppendLine($"{indentor}}}");
@@ -1692,15 +1694,47 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// One contract's members in the order the wire carries them: the base chain flattened
+        /// base-first, each member paired with the namespace of the contract that declares it.
+        /// </summary>
+        /// <remarks>
+        /// The writer recurses instead, one call per level, because writing is unconditional. A
+        /// reader cannot: it is a single loop over a single monotonically advancing index, and a
+        /// per-level loop would let the base's loop swallow the derived members as elements it does
+        /// not recognise. Upstream draws the same distinction - ReflectionGetMembers flattens the
+        /// chain base-first, and ClassDataContract builds MemberNamespaces by copying the base's
+        /// entries before appending its own, which is why an inherited member keeps its declaring
+        /// contract's namespace rather than the derived contract's.
+        /// </remarks>
+        private List<(MemberSpec Member, string Namespace)> FlattenedMembers(ContractSpec contract)
+        {
+            List<(MemberSpec Member, string Namespace)> flattened = new List<(MemberSpec, string)>();
+            Append(contract);
+            return flattened;
+
+            void Append(ContractSpec spec)
+            {
+                if (spec.BaseContractFullyQualifiedName is string baseName
+                    && _contractSpecs.TryGetValue(baseName, out ContractSpec baseSpec))
+                {
+                    Append(baseSpec);
+                }
+
+                foreach (MemberSpec member in spec.Members)
+                {
+                    flattened.Add((member, spec.ContractNamespace));
+                }
+            }
+        }
+
+        /// <summary>
         /// Whether this contract can be read back, which is a narrower question than whether it can
         /// be written.
         /// </summary>
         /// <remarks>
-        /// The first read slice covers a flat contract of built-in members and nothing else.
-        /// Inheritance, nested contracts, collections, polymorphism and IsReference each need the
-        /// read counterpart of machinery the write side already has, and every one of them is a way
-        /// to silently produce a graph that is not the one recorded - so they stay unreadable until
-        /// they are implemented rather than being approximated.
+        /// Polymorphism and IsReference each need the read counterpart of machinery the write side
+        /// already has, and both are ways to silently produce a graph that is not the one recorded -
+        /// so they stay unreadable until they are implemented rather than approximated.
         /// </remarks>
         private bool IsReadable(ContractSpec contract)
         {
@@ -1716,12 +1750,13 @@ public sealed partial class DataContractSerializerGenerator
 
             bool readable = contract.IsSupported
                 && contract.HasParameterlessConstructor
-                && contract.BaseContractFullyQualifiedName is null
-                && !contract.IsReference;
+                && !contract.IsReference
+                && BaseChainIsKnown(contract)
+                && !HasDerivedContract(contract);
 
             if (readable)
             {
-                foreach (MemberSpec member in contract.Members)
+                foreach ((MemberSpec member, string _) in FlattenedMembers(contract))
                 {
                     if (!member.IsSettable || !IsMemberReadable(member))
                     {
@@ -1733,6 +1768,73 @@ public sealed partial class DataContractSerializerGenerator
 
             _readable[contract.FullyQualifiedName] = readable;
             return readable;
+        }
+
+        /// <summary>Whether every contract above this one in the base chain was collected.</summary>
+        /// <remarks>
+        /// A base the parser did not reach would leave its members out of the flattened list, and
+        /// they would then read as elements the contract does not recognise - skipped in silence.
+        /// </remarks>
+        private bool BaseChainIsKnown(ContractSpec contract)
+        {
+            ContractSpec current = contract;
+            while (current.BaseContractFullyQualifiedName is string baseName)
+            {
+                if (!_contractSpecs.TryGetValue(baseName, out ContractSpec baseSpec) || !baseSpec.IsSupported)
+                {
+                    return false;
+                }
+
+                current = baseSpec;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a derived contract could legitimately turn up where this one is expected.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A member typed as this contract declines already, through its Candidates. The root of a
+        /// document has no member to carry that, so the same question has to be asked of the
+        /// contract itself: reading a derived instance through its base's reader would drop every
+        /// member the derived contract adds and report success.
+        /// </para>
+        /// <para>
+        /// Merely deriving from this contract is not enough to make that possible. An i:type is
+        /// resolved against the known types, so a derived contract this one never names is one the
+        /// reflection-based reader would refuse outright - declining for it would cost coverage and
+        /// buy no safety. The test is therefore the intersection: a known type that is also a
+        /// descendant.
+        /// </para>
+        /// </remarks>
+        private bool HasDerivedContract(ContractSpec contract)
+        {
+            foreach (string knownType in contract.KnownTypes)
+            {
+                if (!_contractSpecs.TryGetValue(knownType, out ContractSpec candidate))
+                {
+                    continue;
+                }
+
+                while (candidate.BaseContractFullyQualifiedName is string baseName)
+                {
+                    if (string.Equals(baseName, contract.FullyQualifiedName, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+
+                    if (!_contractSpecs.TryGetValue(baseName, out ContractSpec baseSpec))
+                    {
+                        break;
+                    }
+
+                    candidate = baseSpec;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Whether one member can be read back.</summary>
