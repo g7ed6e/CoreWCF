@@ -23,6 +23,17 @@ public sealed partial class DataContractSerializerGenerator
         string? BaseContractFullyQualifiedName,
         bool IsRoot) : IEquatable<ContractSpec>
     {
+        /// <summary>
+        /// Whether this contract preserves object identity, writing <c>z:Id</c> on first sight of an
+        /// instance and <c>z:Ref</c> on every later one.
+        /// </summary>
+        /// <remarks>
+        /// Inherited: a derived contract that says nothing still gets it from its base. It is a
+        /// property of the contract rather than of the member referring to it, so the decision is
+        /// taken where the element is opened - at the root, or on the member element.
+        /// </remarks>
+        public bool IsReference { get; init; }
+
         public bool IsSupported => UnsupportedReason is null;
 
         /// <summary>Same contract, newly declared unsupported.</summary>

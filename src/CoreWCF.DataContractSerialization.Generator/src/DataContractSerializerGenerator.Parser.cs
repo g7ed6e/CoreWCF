@@ -229,9 +229,13 @@ public sealed partial class DataContractSerializerGenerator
             // IsReference makes the serializer emit z:Id and z:Ref to preserve object identity.
             // It is inherited, so a derived contract that says nothing still gets it from its base -
             // reading only this type's attribute would miss that and emit plausible, wrong output.
-            if (InheritsIsReference(contractType))
+            bool isReference = InheritsIsReference(contractType);
+
+            // A value type has no identity to preserve, and DataContract throws rather than quietly
+            // ignoring the request - so decline and let the reflection path throw as it does today.
+            if (isReference && contractType.IsValueType)
             {
-                unsupportedReason = "IsReference is not supported yet";
+                unsupportedReason = "IsReference is not valid on a value type";
             }
 
             // A contract from another assembly is only safe if every one of its data members is
@@ -255,6 +259,22 @@ public sealed partial class DataContractSerializerGenerator
             if (baseContract is not null)
             {
                 referenced.Add(baseContract);
+            }
+
+            // A contract may restate IsReference but not contradict what its base contract says.
+            // DataContract rejects that with InvalidDataContractException, so declining leaves the
+            // reflection path to throw exactly as it does today rather than inventing an answer.
+            // Only a data-contract base participates: a contract at the root of its hierarchy is
+            // free to turn IsReference on, which is how every reference-preserving graph starts.
+            // See ClassDataContractCriticalHelper.EnsureIsReferenceImported in dotnet/runtime.
+            if (unsupportedReason is null
+                && baseContract is not null
+                && GetNamedArgumentBoolean(dataContract, "IsReference") is bool declaredIsReference
+                && declaredIsReference != InheritsIsReference(baseContract))
+            {
+                unsupportedReason = "IsReference = " + (declaredIsReference ? "true" : "false") +
+                                    " contradicts base contract " + baseContract.Name +
+                                    ", which DataContractSerializer rejects";
             }
 
             // A base class that is not itself a data contract contributes no members but is also
@@ -371,7 +391,10 @@ public sealed partial class DataContractSerializerGenerator
                 new EquatableArray<MemberSpec>(members.ToArray()),
                 unsupportedReason,
                 baseContract?.ToDisplayString(FullyQualifiedFormat),
-                isRoot);
+                isRoot)
+            {
+                IsReference = isReference
+            };
         }
 
         /// <summary>The element type of a supported collection, or null if this is not one.</summary>

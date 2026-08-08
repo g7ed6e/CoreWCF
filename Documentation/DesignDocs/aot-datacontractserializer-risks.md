@@ -19,7 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3+ — deferred** | Collections, enums, inheritance, `[KnownType]`/`i:type`, `IsReference`/`z:Id`, `ReadObject`, and the seam gaps below. |
+| **M3 — capability by capability** | In progress. Nested contract members and inheritance, then enums, then arrays and `List<T>` of primitives, then `IsReference`. **49 of 76** corpus cases byte-match; the rest report unsupported and skip. |
+| **M4+ — deferred** | `object` members and `[KnownType]`/`i:type` (the largest remaining blocker, 7 contracts), `[Serializable]`, `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, `ReadObject`, and the seam gaps below. |
 
 ## What the switch does
 
@@ -94,6 +95,31 @@ The serializer explicitly declares a namespace in exactly two places:
 `z:Id` / `z:Ref` are written as attributes with an explicit `Globals.SerPrefix`
 (`XmlObjectSerializerWriteContext.cs:218,224`), which is why `z:` is stable rather than allocated.
 
+### Object identity, as `IsReference` defines it
+
+From `XmlObjectSerializerWriteContext.OnHandleIsReference` and `ObjectToIdCache`:
+
+- Ids come from a **per-call** cache whose counter starts at **1**, so every document restarts at
+  `i1`. Only objects whose contract is `IsReference` consume an id — which is why a
+  reference-preserving member of a plain root is `i1` and not `i2`.
+- Lookup is by **reference**, via `RuntimeHelpers.GetHashCode` and `==`, never `Equals`. A contract
+  that overrides equality still gets one id per instance, and two equal-but-distinct instances must
+  not collapse into a single `z:Ref`.
+- First sight writes `z:Id` and the members; a later sight writes `z:Ref` and **nothing else** —
+  `OnHandleIsReference` returning true means "already written". That, not a visited-set check, is
+  what terminates a cycle.
+- The decision belongs to the element that wraps the object, so it is taken once at the root or on
+  the member element — never once per level of a base chain.
+- `IsReference` is inherited, and a derived contract may restate it but not contradict its base:
+  `ClassDataContractCriticalHelper.EnsureIsReferenceImported` throws `InvalidDataContractException`.
+  It is also invalid on a value type. The generator declines both rather than emitting a serializer
+  that would accept a contract the real one rejects.
+
+The `z` prefix is never declared by the generator. Writing an attribute in the serialization
+namespace makes the writer declare it wherever it first comes into scope, which reproduces both
+fixture shapes on its own: `xmlns:z` on the root when the root contract is `IsReference`, and on the
+member element when only a nested contract is.
+
 ---
 
 ## Risk register
@@ -128,12 +154,15 @@ and the finding that prefix allocation belongs to the writer removes the hardest
 What remains: the emitted code must make the *same writer calls in the same order*. Any deviation —
 an extra `WriteNamespaceDecl`, a differently-timed `WriteStartElement` — changes prefixes downstream.
 
-### 2. "Flat contracts" is a smaller slice than it sounds
+### 2. ~~"Flat contracts" is a smaller slice than it sounds~~ — closed by M3
 
 Roughly 10 of the 75 corpus cases. "Flat" does not mean "no nested types": `SanityCustomNaming` has a
 contract-typed member, so the generator must already walk the transitive type graph and emit a
 serializer per reachable contract. The milestone proves the loop end to end; it does not cover most
 of the corpus.
+
+M3 took it from 3 to 49 of 76 by adding one capability at a time. The prediction held: the
+transitive-graph machinery built for the first slice is what everything since has been layered onto.
 
 ### 3. ~~Member ordering is under-determined~~ — closed
 
@@ -149,6 +178,19 @@ net472, where the generator never runs — falling back to reflection with no `#
 
 Residual: on net472 the generated tests must report every case *unsupported*, not silently pass. A
 pass because nothing ran looks identical to a pass because everything matched.
+
+### 4a. A cycle without `IsReference` overflows the stack instead of throwing
+
+`DataContractSerializer` counts nesting depth and, past 512 levels, checks whether the object is
+already on the stack and throws `CannotSerializeObjectWithCycles`
+(`XmlObjectSerializerWriteContext.OnHandleReference`). The generator does not carry that counter, so
+the same graph recurses until the stack runs out.
+
+Only reachable when a **non**-`IsReference` contract holds a genuine cycle — a graph the real
+serializer also refuses, so no valid document is affected and no corpus case exercises it. What
+differs is the failure mode: a catchable `SerializationException` becomes a process-killing
+`StackOverflowException`. Cheap to close (a depth counter threaded alongside the reference scope);
+left open deliberately rather than by oversight, and worth closing before the package ships.
 
 ### 5. The seam has gaps this work does not close
 

@@ -429,8 +429,81 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Contains("IsReference", result.SingleSource);
-            Assert.DoesNotContain("if (type == typeof(global::App.QuietDerived))", result.SingleSource);
+            Assert.Contains("if (type == typeof(global::App.QuietDerived))", result.SingleSource);
+            Assert.Contains("scope.WriteIdOrRef(writer, graph);", result.SingleSource);
+        }
+
+        [Fact]
+        public void ContractWithoutIsReference_WritesNoId()
+        {
+            // The counterpart to the test above: a plain contract must not acquire a z:Id, which
+            // would be a visible difference in every document it appears in.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
+    [DataContractSerializable(typeof(Order))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("if (type == typeof(global::App.Order))", result.SingleSource);
+
+            // The scope type is always emitted because every content writer takes one; what must
+            // be absent is any call that would put an id on the wire.
+            Assert.DoesNotContain("scope.WriteIdOrRef", result.SingleSource);
+        }
+
+        [Fact]
+        public void IsReferenceMemberSeenTwice_WritesARefInsteadOfTheContent()
+        {
+            // The whole point of IsReference: the second sight of an instance is a z:Ref with no
+            // content. Writing the members again would both duplicate data and, for a cycle,
+            // recurse forever.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(IsReference = true)]
+    public class Node
+    {
+        [DataMember] public Node Next { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Node))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("if (!scope.WriteIdOrRef(writer, value.Next))", result.SingleSource);
+        }
+
+        [Fact]
+        public void ContradictoryIsReference_LeavesTheContractToReflection()
+        {
+            // A derived contract cannot disagree with its base about IsReference:
+            // DataContractSerializer throws InvalidDataContractException. Declining keeps that
+            // throw, where emitting a serializer would silently accept an invalid contract.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class PlainBase
+    {
+        [DataMember] public int BaseValue { get; set; }
+    }
+
+    [DataContract(IsReference = true)]
+    public class LoudDerived : PlainBase
+    {
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(LoudDerived))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("contradicts base contract PlainBase", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.LoudDerived))", result.SingleSource);
         }
 
         [Fact]
@@ -475,14 +548,13 @@ namespace App
         }
 
         [Fact]
-        public void IsReferenceContract_LeavesTheContractToReflection()
+        public void IsReferenceOnAValueType_LeavesTheContractToReflection()
         {
-            // IsReference makes the serializer emit z:Id and z:Ref for object identity, which this
-            // slice does not implement. Emitting a serializer that ignored it would produce output
-            // that looks plausible and is wrong.
+            // A struct has no identity to preserve, and DataContractSerializer rejects the
+            // combination rather than ignoring it. Declining keeps that behaviour.
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"
     [DataContract(IsReference = true)]
-    public class Referenced
+    public struct Referenced
     {
         [DataMember] public int Value { get; set; }
     }
@@ -494,7 +566,7 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Contains("IsReference", result.SingleSource);
+            Assert.Contains("IsReference is not valid on a value type", result.SingleSource);
             Assert.DoesNotContain("if (type == typeof(global::App.Referenced))", result.SingleSource);
         }
 
