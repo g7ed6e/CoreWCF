@@ -465,6 +465,7 @@ public sealed partial class DataContractSerializerGenerator
 
                 List<string> candidates = new();
                 List<string> enumCandidates = new();
+                BoxedDeclaration boxed = BoxedDeclaration.Object;
 
                 if (nestedContract is not null && kind == MemberKind.Contract)
                 {
@@ -506,16 +507,33 @@ public sealed partial class DataContractSerializerGenerator
                 }
                 else if (kind == MemberKind.Object)
                 {
+                    boxed = UnwrapNullable(memberType).ToDisplayString() switch
+                    {
+                        "System.ValueType" => BoxedDeclaration.ValueType,
+                        "System.Enum" => BoxedDeclaration.Enum,
+                        "System.Array" => BoxedDeclaration.Array,
+                        _ => BoxedDeclaration.Object
+                    };
+
                     // object constrains nothing, so every known type in scope is a candidate. The
                     // boxed primitives are always allowed and are added by the emitter; a known type
                     // that is not a writable contract - an enum, a [Serializable] type - would leave
                     // the switch with no branch for it, so the contract is declined instead.
                     foreach (INamedTypeSymbol knownType in knownTypes)
                     {
-                        if (knownType.TypeKind == TypeKind.Enum)
+                        if (knownType.TypeKind == TypeKind.Enum && boxed != BoxedDeclaration.Array)
                         {
                             enums.Add(knownType);
                             enumCandidates.Add(knownType.ToDisplayString(FullyQualifiedFormat));
+                            continue;
+                        }
+
+                        // A known type the declared type cannot hold is not a candidate: an Enum
+                        // member admits only enums, and a ValueType member only value types. This is
+                        // not a nicety - the emitted cast would not compile.
+                        if (boxed is BoxedDeclaration.Enum or BoxedDeclaration.Array
+                            || (boxed == BoxedDeclaration.ValueType && !knownType.IsValueType))
+                        {
                             continue;
                         }
 
@@ -585,7 +603,8 @@ public sealed partial class DataContractSerializerGenerator
                     ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
                     ElementCanBeNull = elementCanBeNull,
                     Candidates = new EquatableArray<string>(candidates.ToArray()),
-                    EnumCandidates = new EquatableArray<string>(enumCandidates.ToArray())
+                    EnumCandidates = new EquatableArray<string>(enumCandidates.ToArray()),
+                    Boxed = boxed
                 });
             }
 
@@ -1126,8 +1145,17 @@ public sealed partial class DataContractSerializerGenerator
                     return MemberKind.TimeSpan;
                 case "System.Uri":
                     return isNullableValueType ? MemberKind.Unsupported : MemberKind.Uri;
+                case "System.Xml.XmlQualifiedName":
+                    return isNullableValueType ? MemberKind.Unsupported : MemberKind.QName;
                 case "System.DateTimeOffset":
                     return MemberKind.DateTimeOffset;
+
+                // Declared as an abstract base rather than a concrete type, so the runtime type
+                // decides everything - the same shape as object, over a narrower candidate set.
+                case "System.ValueType":
+                case "System.Enum":
+                case "System.Array":
+                    return isNullableValueType ? MemberKind.Unsupported : MemberKind.Object;
             }
 
             if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType)

@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | In progress. Nested contract members and inheritance, then enums, then arrays and `List<T>` of primitives, then `IsReference`, then `[KnownType]`/`i:type` and `object` members, then `[Serializable]`. **65 of 77** corpus cases byte-match; the rest report unsupported and skip. |
-| **M4+ — deferred** | `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, enums in an `object` member, implicit (no-attribute) contracts, `[KnownType]` naming a method, `ISerializable`, `ReadObject`, and the seam gaps below. |
+| **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, and members declared as `ValueType`/`Enum`/`Array`. **68 of 78** corpus cases byte-match; the rest report unsupported and skip. |
+| **M4+ — deferred** | `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, implicit (no-attribute) contracts, `[KnownType]` naming a method, non-public data members, `ISerializable`, `ReadObject`, and the seam gaps below. |
 
 ## What the switch does
 
@@ -241,7 +241,7 @@ differs is the failure mode: a catchable `SerializationException` becomes a proc
 `StackOverflowException`. Cheap to close (a depth counter threaded alongside the reference scope);
 left open deliberately rather than by oversight, and worth closing before the package ships.
 
-### 4c. `AllTypes` needs eight capabilities, not one — and the decline message hides that
+### 4c. ~~`AllTypes` needs eight capabilities, not one~~ — closed, but the reporting lesson stands
 
 `ParseContract` records the **first** reason a contract is declined (`unsupportedReason ??=`) and
 stops describing it. For a wide contract that reads like a single remaining blocker when it is one
@@ -255,15 +255,21 @@ of many, and it caused exactly that misreading of `AllTypes` once already.
 | `MyEnum1[] enumArrayData` | collections of enums | done |
 | `Uri uri` | `Uri`, written via `GetComponents(SerializationInfoString, UriEscaped)` | done |
 | `List<DateTimeOffset> lDTO`, `DateTimeOffset? nDTO` | `DateTimeOffset` as a two-member contract in the `System` namespace | done |
-| `XmlQualifiedName xmlQualifiedName` | QName values, whose member element takes a `q:` prefix of its own rather than reusing the contract's | open |
-| `ValueType timeSpan`, `ValueType valType` | a member declared as `System.ValueType`: the boxed switch again, but over value types | open |
-| `Enum enumBase1` | a member declared as `System.Enum`: the boxed switch over enums | open |
-| `Array array1` | a member declared as `System.Array`, whose items declare the Arrays namespace as a *default* xmlns on each element rather than a prefix on the member | open |
+| `XmlQualifiedName xmlQualifiedName` | QName values, whose member element takes a `q:` prefix of its own rather than reusing the contract's | done |
+| `ValueType timeSpan`, `ValueType valType` | a member declared as `System.ValueType`: the boxed switch again, but over value types | done |
+| `Enum enumBase1` | a member declared as `System.Enum`: the boxed switch over enums | done |
+| `Array array1` | a member declared as `System.Array`, whose items declare the Arrays namespace as a *default* xmlns on each element rather than a prefix on the member | done |
 
-Four down, four to go; the case count has not moved, because these two contracts need all eight
-before either can pass. The four that are done are the ones worth having on their own - `Uri` and
-`DateTimeOffset` turn up in ordinary service contracts, where the other four are shapes only a
-deliberately pathological test type produces.
+All eight landed and both contracts now byte-match. Two of the eight were only ever going to matter
+here - `XmlQualifiedName`'s own element prefix and the `System.Array` member - and both are
+implemented narrowly: the array writer covers `object[]` of primitives and bare objects and throws
+otherwise, because a contract or enum inside an untyped array would need the containing contract's
+known types, which an item writer shared across the whole context does not have.
+
+The reporting lesson stands regardless: `ParseContract` records the **first** reason a contract is
+declined and stops, so a wide contract reads like a single blocker when it is one of many. That
+misled a coverage estimate once already. Collecting every reason rather than the first would make
+the remaining work legible.
 
 The general lesson is about the report, not the contract: a coverage report that names one cause per
 contract will understate the work whenever the contract is wide. Collecting every reason rather than

@@ -116,6 +116,17 @@ public sealed partial class DataContractSerializerGenerator
         /// table rather than by a content writer, and it has no <c>ContractSpec</c> to look up.
         /// </remarks>
         public EquatableArray<string> EnumCandidates { get; init; } = new EquatableArray<string>(Array.Empty<string>());
+
+        /// <summary>
+        /// For <see cref="MemberKind.Object"/>, which abstract type the member is declared as.
+        /// </summary>
+        /// <remarks>
+        /// All three are written the same way - a switch on the runtime type, announced with
+        /// i:type - but they admit different candidates, and the difference is not cosmetic:
+        /// casting a <c>ValueType</c> to <c>string</c> is a compile error, so emitting the full
+        /// table for one would produce generated code that does not build.
+        /// </remarks>
+        public BoxedDeclaration Boxed { get; init; }
     }
 
     /// <summary>
@@ -140,6 +151,26 @@ public sealed partial class DataContractSerializerGenerator
     }
 
     internal sealed record EnumMemberSpec(string Name, long Value) : IEquatable<EnumMemberSpec>;
+
+    /// <summary>
+    /// The abstract type a boxed member is declared as, which decides what it may hold.
+    /// </summary>
+    internal enum BoxedDeclaration
+    {
+        /// <summary>Anything: every primitive, every known contract, every known enum.</summary>
+        Object = 0,
+
+        /// <summary>Value types only, so the reference-typed primitives are not candidates.</summary>
+        ValueType,
+
+        /// <summary>Enums only.</summary>
+        Enum,
+
+        /// <summary>
+        /// Arrays. Only <c>object[]</c> is written, as a sequence of anyType items.
+        /// </summary>
+        Array
+    }
 
     /// <summary>
     /// How a member's value is written. Mirrors the primitive cases XmlWriterDelegator handles in
@@ -168,6 +199,11 @@ public sealed partial class DataContractSerializerGenerator
         TimeSpan,
         ByteArray,
         Uri,
+
+        /// <summary>
+        /// <c>XmlQualifiedName</c>, the one member type whose element carries a prefix of its own.
+        /// </summary>
+        QName,
 
         /// <summary>
         /// <c>DateTimeOffset</c>, which is not a primitive at all: it is written as a two-member

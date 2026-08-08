@@ -90,6 +90,8 @@ public sealed partial class DataContractSerializerGenerator
             EmitCoversKnownTypes(indentor, context);
             EmitNilHelper(indentor);
             EmitDateTimeOffsetHelper(indentor);
+            EmitQNameHelper(indentor);
+            EmitAnyTypeHelper(indentor);
             EmitReferenceScope(indentor);
 
             if (context.Enums.Count > 0)
@@ -413,9 +415,22 @@ public sealed partial class DataContractSerializerGenerator
             bool canBeNull = !nullAlreadyExcluded
                 && (member.IsNullableValueType
                     || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract
-                        or MemberKind.Collection or MemberKind.Object or MemberKind.Uri);
+                        or MemberKind.Collection or MemberKind.Object or MemberKind.Uri or MemberKind.QName);
 
-            _builder.AppendLine($"{indentor}writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});");
+            // An XmlQualifiedName member is the one case where the element carries a prefix of its
+            // own rather than reusing whatever the writer has bound. Mirrors NeedsPrefix in
+            // ReflectionXmlFormatWriter, which forces Globals.ElementPrefix for exactly this type
+            // and only when the namespace is non-empty. The result is a second prefix bound to the
+            // contract's namespace alongside the one already in scope, which looks redundant and is
+            // what the serializer does.
+            if (member.Kind == MemberKind.QName && contract.ContractNamespace.Length > 0)
+            {
+                _builder.AppendLine($"{indentor}writer.WriteStartElement(\"q\", {name}, {Literal(contract.ContractNamespace)});");
+            }
+            else
+            {
+                _builder.AppendLine($"{indentor}writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});");
+            }
 
             // A member whose type lives in a different contract namespace declares it here rather
             // than at the root. Mirrors ClassDataContract.GetChildNamespaceToDeclare, and is what
@@ -650,16 +665,54 @@ public sealed partial class DataContractSerializerGenerator
         private void EmitObjectMember(Indentor indentor, MemberSpec member, string value)
         {
             _builder.AppendLine($"{indentor}global::System.Type __runtimeType = {value}.GetType();");
-            _builder.AppendLine($"{indentor}if (__runtimeType == typeof(object))");
-            _builder.AppendLine($"{indentor}{{");
-            indentor.Increment();
-            _builder.AppendLine($"{indentor}// anyType: neither i:type nor content");
-            indentor.Decrement();
-            _builder.AppendLine($"{indentor}}}");
 
-            foreach ((string clrType, MemberKind kind, string xsiName, string xsiNamespace) in BoxedPrimitives)
+            bool first = true;
+
+            if (member.Boxed == BoxedDeclaration.Array)
             {
-                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({clrType}))");
+                // The member element declares nothing, so each item binds the Arrays namespace as a
+                // default xmlns of its own. That is the visible difference from a typed collection,
+                // where the namespace is declared once on the member and the items carry a prefix.
+                _builder.AppendLine($"{indentor}if (__runtimeType == typeof(object[]))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}foreach (object __item in (object[]){value})");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}writer.WriteStartElement(\"anyType\", {Literal(CollectionNamespace)});");
+                _builder.AppendLine($"{indentor}WriteAnyType(writer, __item);");
+                _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                first = false;
+            }
+
+            if (member.Boxed == BoxedDeclaration.Object)
+            {
+                _builder.AppendLine($"{indentor}if (__runtimeType == typeof(object))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}// anyType: neither i:type nor content");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                first = false;
+            }
+
+            foreach ((string clrType, MemberKind kind, string xsiName, string xsiNamespace, bool isValueType) in BoxedPrimitives)
+            {
+                // A member declared as ValueType cannot hold a string, and casting one to string is
+                // a compile error rather than a branch that never runs - so the table is filtered
+                // rather than emitted whole. An Enum member admits no primitive at all.
+                if (member.Boxed is BoxedDeclaration.Enum or BoxedDeclaration.Array
+                    || (member.Boxed == BoxedDeclaration.ValueType && !isValueType))
+                {
+                    continue;
+                }
+
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} (__runtimeType == typeof({clrType}))");
+                first = false;
                 _builder.AppendLine($"{indentor}{{");
                 indentor.Increment();
                 EmitXsiType(indentor, xsiName, xsiNamespace);
@@ -672,7 +725,8 @@ public sealed partial class DataContractSerializerGenerator
             {
                 ContractSpec spec = _contractSpecs[candidate];
 
-                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({candidate}))");
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} (__runtimeType == typeof({candidate}))");
+                first = false;
                 _builder.AppendLine($"{indentor}{{");
                 indentor.Increment();
                 EmitXsiType(indentor, spec.ContractName, spec.ContractNamespace);
@@ -701,7 +755,8 @@ public sealed partial class DataContractSerializerGenerator
             {
                 EnumSpec spec = _enumSpecs[enumCandidate];
 
-                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({enumCandidate}))");
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} (__runtimeType == typeof({enumCandidate}))");
+                first = false;
                 _builder.AppendLine($"{indentor}{{");
                 indentor.Increment();
                 EmitXsiType(indentor, spec.ContractName, spec.ContractNamespace);
@@ -710,7 +765,7 @@ public sealed partial class DataContractSerializerGenerator
                 _builder.AppendLine($"{indentor}}}");
             }
 
-            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{(first ? "if (true)" : "else")}");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
             _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
@@ -729,29 +784,29 @@ public sealed partial class DataContractSerializerGenerator
         /// gets wrong: sbyte is "byte" while byte is "unsignedByte", and char, Guid and TimeSpan are
         /// named in the serialization namespace because XML Schema has nothing to call them.
         /// </remarks>
-        private static IEnumerable<(string ClrType, MemberKind Kind, string XsiName, string XsiNamespace)> BoxedPrimitives
+        private static IEnumerable<(string ClrType, MemberKind Kind, string XsiName, string XsiNamespace, bool IsValueType)> BoxedPrimitives
         {
             get
             {
-                yield return ("bool", MemberKind.Boolean, "boolean", SchemaNamespace);
-                yield return ("byte[]", MemberKind.ByteArray, "base64Binary", SchemaNamespace);
-                yield return ("char", MemberKind.Char, "char", SerializationNamespace);
-                yield return ("global::System.DateTime", MemberKind.DateTime, "dateTime", SchemaNamespace);
-                yield return ("decimal", MemberKind.Decimal, "decimal", SchemaNamespace);
-                yield return ("double", MemberKind.Double, "double", SchemaNamespace);
-                yield return ("float", MemberKind.Single, "float", SchemaNamespace);
-                yield return ("global::System.Guid", MemberKind.Guid, "guid", SerializationNamespace);
-                yield return ("short", MemberKind.Int16, "short", SchemaNamespace);
-                yield return ("int", MemberKind.Int32, "int", SchemaNamespace);
-                yield return ("long", MemberKind.Int64, "long", SchemaNamespace);
-                yield return ("sbyte", MemberKind.SByte, "byte", SchemaNamespace);
-                yield return ("string", MemberKind.String, "string", SchemaNamespace);
-                yield return ("global::System.TimeSpan", MemberKind.TimeSpan, "duration", SerializationNamespace);
-                yield return ("global::System.Uri", MemberKind.Uri, "anyURI", SchemaNamespace);
-                yield return ("ushort", MemberKind.UInt16, "unsignedShort", SchemaNamespace);
-                yield return ("uint", MemberKind.UInt32, "unsignedInt", SchemaNamespace);
-                yield return ("ulong", MemberKind.UInt64, "unsignedLong", SchemaNamespace);
-                yield return ("byte", MemberKind.Byte, "unsignedByte", SchemaNamespace);
+                yield return ("bool", MemberKind.Boolean, "boolean", SchemaNamespace, true);
+                yield return ("byte[]", MemberKind.ByteArray, "base64Binary", SchemaNamespace, false);
+                yield return ("char", MemberKind.Char, "char", SerializationNamespace, true);
+                yield return ("global::System.DateTime", MemberKind.DateTime, "dateTime", SchemaNamespace, true);
+                yield return ("decimal", MemberKind.Decimal, "decimal", SchemaNamespace, true);
+                yield return ("double", MemberKind.Double, "double", SchemaNamespace, true);
+                yield return ("float", MemberKind.Single, "float", SchemaNamespace, true);
+                yield return ("global::System.Guid", MemberKind.Guid, "guid", SerializationNamespace, true);
+                yield return ("short", MemberKind.Int16, "short", SchemaNamespace, true);
+                yield return ("int", MemberKind.Int32, "int", SchemaNamespace, true);
+                yield return ("long", MemberKind.Int64, "long", SchemaNamespace, true);
+                yield return ("sbyte", MemberKind.SByte, "byte", SchemaNamespace, true);
+                yield return ("string", MemberKind.String, "string", SchemaNamespace, false);
+                yield return ("global::System.TimeSpan", MemberKind.TimeSpan, "duration", SerializationNamespace, true);
+                yield return ("global::System.Uri", MemberKind.Uri, "anyURI", SchemaNamespace, false);
+                yield return ("ushort", MemberKind.UInt16, "unsignedShort", SchemaNamespace, true);
+                yield return ("uint", MemberKind.UInt32, "unsignedInt", SchemaNamespace, true);
+                yield return ("ulong", MemberKind.UInt64, "unsignedLong", SchemaNamespace, true);
+                yield return ("byte", MemberKind.Byte, "unsignedByte", SchemaNamespace, true);
             }
         }
 
@@ -802,6 +857,7 @@ public sealed partial class DataContractSerializerGenerator
                 $"writer.WriteString({value}.GetComponents(global::System.UriComponents.SerializationInfoString, global::System.UriFormat.UriEscaped));",
 
             MemberKind.DateTimeOffset => $"WriteDateTimeOffset(writer, {value});",
+            MemberKind.QName => $"WriteQName(writer, {value});",
             _ => $"writer.WriteValue({value});"
         };
 
@@ -819,7 +875,7 @@ public sealed partial class DataContractSerializerGenerator
             return member.Kind switch
             {
                 MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection
-                    or MemberKind.Object or MemberKind.Uri => $"{access} == null",
+                    or MemberKind.Object or MemberKind.Uri or MemberKind.QName => $"{access} == null",
                 MemberKind.Boolean => $"!{access}",
                 _ => $"{access} == default"
             };
@@ -998,6 +1054,86 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}writer.WriteStartElement(\"OffsetMinutes\", {Literal(SystemContractNamespace)});");
             _builder.AppendLine($"{indentor}writer.WriteValue((short)value.Offset.TotalMinutes);");
             _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the writer for an <c>XmlQualifiedName</c> value.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors XmlWriterDelegator.WriteQName. The empty name writes nothing at all - not an
+        /// empty string - and otherwise the value's namespace is declared before the qualified name
+        /// is written, so the writer has a prefix to render it with.
+        /// </remarks>
+        private void EmitQNameHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void WriteQName({DictionaryWriter} writer, global::System.Xml.XmlQualifiedName value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (value != global::System.Xml.XmlQualifiedName.Empty)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteXmlnsAttribute(null, value.Namespace);");
+            _builder.AppendLine($"{indentor}writer.WriteQualifiedName(value.Name, value.Namespace);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the writer for one item of an <c>object[]</c>, whose element is already open.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately narrower than a member's boxed switch: it covers the primitives, a bare
+        /// object and null, and throws for anything else. A contract or enum inside an untyped array
+        /// would need the containing contract's known types, which an item writer shared across the
+        /// whole context does not have.
+        /// </remarks>
+        private void EmitAnyTypeHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void WriteAnyType({DictionaryWriter} writer, object value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (value == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}WriteNil(writer);");
+            _builder.AppendLine($"{indentor}return;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}global::System.Type __runtimeType = value.GetType();");
+            _builder.AppendLine($"{indentor}if (__runtimeType == typeof(object))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}// anyType: neither i:type nor content");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+
+            foreach ((string clrType, MemberKind kind, string xsiName, string xsiNamespace, bool _) in BoxedPrimitives)
+            {
+                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({clrType}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitXsiType(indentor, xsiName, xsiNamespace);
+                _builder.AppendLine($"{indentor}{WriteValueStatement(kind, $"(({clrType})value)")}");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Type '\" + __runtimeType.FullName + \"' cannot be written as an untyped array item.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
         }

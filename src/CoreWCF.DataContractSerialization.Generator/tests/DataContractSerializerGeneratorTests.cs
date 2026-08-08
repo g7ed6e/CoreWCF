@@ -789,6 +789,58 @@ namespace App
         }
 
         [Fact]
+        public void XmlQualifiedNameMember_GetsItsOwnElementPrefix()
+        {
+            // The one member type whose element carries a prefix of its own rather than reusing
+            // what the writer has bound, so a second prefix ends up on the contract's namespace
+            // beside the one already in scope. Mirrors NeedsPrefix in ReflectionXmlFormatWriter,
+            // which forces it for this type alone and only when the namespace is non-empty.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Named
+    {
+        [DataMember] public System.Xml.XmlQualifiedName Which { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Named))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteStartElement(\"q\", \"Which\", \"http://schemas.datacontract.org/2004/07/App\");", result.SingleSource);
+
+            // The empty name writes nothing at all, not an empty string.
+            Assert.Contains("if (value != global::System.Xml.XmlQualifiedName.Empty)", result.SingleSource);
+        }
+
+        [Fact]
+        public void ValueTypeMember_OffersOnlyValueTypeCandidates()
+        {
+            // A member declared as ValueType is the boxed switch over a narrower set. The filtering
+            // is not cosmetic: casting a ValueType to string is a compile error, so an unfiltered
+            // table would emit generated code that does not build.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Boxy
+    {
+        [DataMember] public System.ValueType Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Boxy))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("__runtimeType == typeof(int)", result.SingleSource);
+            Assert.DoesNotContain("((string)value.Value)", result.SingleSource);
+            Assert.DoesNotContain("((byte[])value.Value)", result.SingleSource);
+        }
+
+        [Fact]
         public void UriMember_IsWrittenFromItsSerializationComponents()
         {
             // Not ToString(). SerializationInfoString is the round-trippable form, and it is what
