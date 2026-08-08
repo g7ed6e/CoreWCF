@@ -696,6 +696,7 @@ public sealed partial class DataContractSerializerGenerator
                 baseContract?.ToDisplayString(FullyQualifiedFormat),
                 isRoot)
             {
+                Location = contractType.Locations.Length > 0 ? LocationInfo.From(contractType.Locations[0]) : null,
                 IsReference = isReference,
                 IsValueType = contractType.IsValueType,
                 HasParameterlessConstructor = contractType.IsValueType

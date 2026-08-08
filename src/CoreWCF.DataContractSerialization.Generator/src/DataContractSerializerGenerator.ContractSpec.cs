@@ -63,6 +63,16 @@ public sealed partial class DataContractSerializerGenerator
         /// </remarks>
         public bool IsValueType { get; init; }
 
+        /// <summary>Where the contract is declared, for a diagnostic to point at.</summary>
+        /// <remarks>
+        /// The one piece of syntax on the spec, and it does cost some incrementality: editing the
+        /// file a contract lives in shifts its span and so invalidates the spec even when the
+        /// contract's shape has not changed. The trade is deliberate - a fallback warning with no
+        /// location is one the user cannot act on - and it is bounded, because a change to that file
+        /// re-runs the parse for that contract anyway in every case but a moved comment.
+        /// </remarks>
+        public LocationInfo? Location { get; init; }
+
         public bool IsSupported => UnsupportedReasons.Count == 0;
 
         /// <summary>

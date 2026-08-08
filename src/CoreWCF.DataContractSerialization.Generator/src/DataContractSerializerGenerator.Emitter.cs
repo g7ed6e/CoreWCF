@@ -50,7 +50,15 @@ public sealed partial class DataContractSerializerGenerator
         private readonly Dictionary<string, ContractSpec> _contractSpecs = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _enumIndexes = new(StringComparer.Ordinal);
         private readonly Dictionary<string, EnumSpec> _enumSpecs = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, bool> _readable = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string?> _readBlockers = new(StringComparer.Ordinal);
+        private readonly List<DiagnosticInfo> _diagnostics = new();
+
+        /// <summary>Fallbacks found while emitting, reported once the source is built.</summary>
+        /// <remarks>
+        /// Produced here rather than by the parser because only the emitter knows the whole graph,
+        /// and readability is a property of the graph rather than of one contract.
+        /// </remarks>
+        internal IReadOnlyList<DiagnosticInfo> Diagnostics => _diagnostics;
 
         internal SourceText Emit(ContextSpec context)
         {
@@ -122,13 +130,36 @@ public sealed partial class DataContractSerializerGenerator
             {
                 if (!contract.IsSupported)
                 {
+                    // Only for the types the user listed. A nested contract that cannot be written
+                    // makes its container unsupported too, so reporting both would bury the one line
+                    // they can act on under a cascade of consequences.
+                    if (contract.IsRoot)
+                    {
+                        _diagnostics.Add(DiagnosticInfo.Create(
+                            DiagnosticDescriptors.FallsBackToReflection,
+                            contract.Location,
+                            DisplayName(contract),
+                            string.Join("; ", contract.UnsupportedReasons)));
+                    }
+
                     continue;
                 }
 
                 _builder.AppendLine();
                 EmitContentWriter(indentor, contract);
 
-                if (IsReadable(contract))
+                if (ReadBlocker(contract) is string readBlocker)
+                {
+                    if (contract.IsRoot)
+                    {
+                        _diagnostics.Add(DiagnosticInfo.Create(
+                            DiagnosticDescriptors.ReadFallsBackToReflection,
+                            contract.Location,
+                            DisplayName(contract),
+                            readBlocker));
+                    }
+                }
+                else
                 {
                     _builder.AppendLine();
                     EmitContentReader(indentor, contract);
@@ -2845,9 +2876,24 @@ public sealed partial class DataContractSerializerGenerator
         /// already has, and both are ways to silently produce a graph that is not the one recorded -
         /// so they stay unreadable until they are implemented rather than approximated.
         /// </remarks>
-        private bool IsReadable(ContractSpec contract)
+        /// <summary>The name a diagnostic shows, which is the C# one rather than the emitted one.</summary>
+        private static string DisplayName(ContractSpec contract) =>
+            contract.FullyQualifiedName.StartsWith("global::", StringComparison.Ordinal)
+                ? contract.FullyQualifiedName.Substring("global::".Length)
+                : contract.FullyQualifiedName;
+
+        private bool IsReadable(ContractSpec contract) => ReadBlocker(contract) is null;
+
+        /// <summary>Why this contract cannot be read back, or null when it can.</summary>
+        /// <remarks>
+        /// A reason rather than a bool, because the answer is reported to the user as a warning and
+        /// "it cannot be read" is not something anyone can act on. The reasons nest: a contract names
+        /// the member that blocks it, which names the contract that blocks <em>that</em>, so the top
+        /// line carries the whole chain down to the thing worth changing.
+        /// </remarks>
+        private string? ReadBlocker(ContractSpec contract)
         {
-            if (_readable.TryGetValue(contract.FullyQualifiedName, out bool known))
+            if (_readBlockers.TryGetValue(contract.FullyQualifiedName, out string? known))
             {
                 return known;
             }
@@ -2855,27 +2901,68 @@ public sealed partial class DataContractSerializerGenerator
             // A contract that reaches itself - a linked list is the ordinary case - is assumed
             // readable while its own answer is being computed. The recursion terminates at run time
             // on a nil or empty element, so the optimistic answer is the right one.
-            _readable[contract.FullyQualifiedName] = true;
+            _readBlockers[contract.FullyQualifiedName] = null;
 
-            bool readable = contract.IsSupported
-                && contract.HasParameterlessConstructor
-                && BaseChainIsKnown(contract)
-                && EveryDerivedContractIsReadable(contract);
+            string? blocker = FindReadBlocker(contract);
+            _readBlockers[contract.FullyQualifiedName] = blocker;
+            return blocker;
+        }
 
-            if (readable)
+        private string? FindReadBlocker(ContractSpec contract)
+        {
+            if (!contract.IsSupported)
             {
-                foreach ((MemberSpec member, string _) in FlattenedMembers(contract))
+                return "it is not written by generated code either";
+            }
+
+            if (!contract.HasParameterlessConstructor)
+            {
+                return "it has no accessible parameterless constructor, which generated code needs " +
+                       "and DataContractSerializer does not";
+            }
+
+            if (!BaseChainIsKnown(contract))
+            {
+                return "a contract in its base chain was not collected";
+            }
+
+            // A document may announce a derived contract with i:type wherever this one is expected,
+            // so reading this one means being able to read those too. Merely deriving from it does
+            // not count: an i:type is resolved against the known types, so a descendant this contract
+            // never names is one the reflection-based reader would refuse outright.
+            foreach (string candidate in DerivedCandidates(contract))
+            {
+                if (ContractReadBlocker(candidate) is string derived)
                 {
-                    if (!member.IsSettable || !IsMemberReadable(member))
-                    {
-                        readable = false;
-                        break;
-                    }
+                    return "known type " + candidate + " " + derived;
                 }
             }
 
-            _readable[contract.FullyQualifiedName] = readable;
-            return readable;
+            foreach ((MemberSpec member, string _) in FlattenedMembers(contract))
+            {
+                if (!member.IsSettable)
+                {
+                    return "member '" + member.MemberName + "' cannot be assigned";
+                }
+
+                if (MemberReadBlocker(member) is string blocked)
+                {
+                    return "member '" + member.MemberName + "' cannot be read back: " + blocked;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>The reason a named contract cannot be read, phrased to nest inside another.</summary>
+        private string? ContractReadBlocker(string fullyQualifiedName)
+        {
+            if (!_contractSpecs.TryGetValue(fullyQualifiedName, out ContractSpec spec))
+            {
+                return "was not collected";
+            }
+
+            return ReadBlocker(spec) is string blocker ? "cannot be read back: " + blocker : null;
         }
 
         /// <summary>Whether every contract above this one in the base chain was collected.</summary>
@@ -2899,40 +2986,16 @@ public sealed partial class DataContractSerializerGenerator
             return true;
         }
 
-        /// <summary>
-        /// Whether every contract that could turn up in place of this one can itself be read.
-        /// </summary>
-        /// <remarks>
-        /// A document may announce a derived contract with i:type wherever this one is expected, so
-        /// reading this contract means being able to read those too. Merely deriving from it is not
-        /// enough to count: an i:type is resolved against the known types, so a descendant this
-        /// contract never names is one the reflection-based reader would refuse outright. The set is
-        /// the intersection - a known type that is also a descendant.
-        /// </remarks>
-        private bool EveryDerivedContractIsReadable(ContractSpec contract)
-        {
-            foreach (string candidate in DerivedCandidates(contract))
-            {
-                if (!_contractSpecs.TryGetValue(candidate, out ContractSpec spec) || !IsReadable(spec))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        /// <summary>Whether one member can be read back.</summary>
-        private bool IsMemberReadable(MemberSpec member)
+        /// <summary>Why one member cannot be read back, or null when it can.</summary>
+        private string? MemberReadBlocker(MemberSpec member)
         {
             if (member.Kind == MemberKind.Object)
             {
                 foreach (string candidate in member.Candidates)
                 {
-                    if (!_contractSpecs.TryGetValue(candidate, out ContractSpec candidateSpec)
-                        || !IsReadable(candidateSpec))
+                    if (ContractReadBlocker(candidate) is string blocked)
                     {
-                        return false;
+                        return "known type " + candidate + " " + blocked;
                     }
                 }
 
@@ -2940,58 +3003,68 @@ public sealed partial class DataContractSerializerGenerator
                 {
                     if (!_enumSpecs.ContainsKey(enumCandidate))
                     {
-                        return false;
+                        return "known enum " + enumCandidate + " was not collected";
                     }
                 }
 
-                return true;
+                return null;
             }
 
             if (member.EnumCandidates.Count > 0)
             {
-                return false;
+                return "it names enum known types outside a boxed member";
             }
 
             if (member.Kind == MemberKind.Contract)
             {
-                if (member.NestedContractFullyQualifiedName is not string nested
-                    || !_contractSpecs.TryGetValue(nested, out ContractSpec nestedSpec)
-                    || !IsReadable(nestedSpec))
+                if (member.NestedContractFullyQualifiedName is not string nested)
                 {
-                    return false;
+                    return "its contract type was not resolved";
                 }
 
-                // Every contract the member may actually hold has to be readable, not just the one
-                // it is declared as - the whole point of the i:type dispatch is that the others turn
-                // up here too.
+                if (ContractReadBlocker(nested) is string nestedBlocked)
+                {
+                    return nested + " " + nestedBlocked;
+                }
+
+                // Every contract the member may actually hold has to be readable, not just the one it
+                // is declared as - the whole point of the i:type dispatch is that the others turn up
+                // here too.
                 foreach (string candidate in member.Candidates)
                 {
-                    if (!_contractSpecs.TryGetValue(candidate, out ContractSpec candidateSpec)
-                        || !IsReadable(candidateSpec))
+                    if (ContractReadBlocker(candidate) is string blocked)
                     {
-                        return false;
+                        return "known type " + candidate + " " + blocked;
                     }
                 }
 
-                return true;
+                return null;
             }
 
             if (member.Kind == MemberKind.Collection)
             {
                 if (member.ElementClrType is null)
                 {
-                    return false;
+                    return "its collection type is not one the reader can build";
                 }
 
                 if (member.ElementKind == MemberKind.Collection)
                 {
-                    return member.NestedElementClrType is not null
-                        && IsBuiltInReadable(member.NestedElementKind);
+                    return member.NestedElementClrType is not null && IsBuiltInReadable(member.NestedElementKind)
+                        ? null
+                        : "its innermost item type is not one the reader can build";
                 }
 
-                return member.ElementKind == MemberKind.Enum
-                    ? ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__text") is not null
-                    : IsBuiltInReadable(member.ElementKind);
+                if (member.ElementKind == MemberKind.Enum)
+                {
+                    return ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__text") is not null
+                        ? null
+                        : "its item enum was not collected";
+                }
+
+                return IsBuiltInReadable(member.ElementKind)
+                    ? null
+                    : "its item type is not one the reader can build";
             }
 
             if (member.Kind == MemberKind.Dictionary)
@@ -3000,15 +3073,21 @@ public sealed partial class DataContractSerializerGenerator
                     && member.ValueClrType is not null
                     && member.ItemNamespace is not null
                     && IsBuiltInReadable(member.KeyKind)
-                    && IsBuiltInReadable(member.ValueKind);
+                    && IsBuiltInReadable(member.ValueKind)
+                    ? null
+                    : "its key or value type is not one the reader can build";
             }
 
             if (member.Kind == MemberKind.Enum)
             {
-                return ReadEnumExpression(member.NestedContractFullyQualifiedName, "__text") is not null;
+                return ReadEnumExpression(member.NestedContractFullyQualifiedName, "__text") is not null
+                    ? null
+                    : "its enum was not collected";
             }
 
-            return IsBuiltInReadable(member.Kind);
+            return IsBuiltInReadable(member.Kind)
+                ? null
+                : "its type is not one the reader can build";
         }
 
         /// <summary>Whether an element whose content is a built-in value can be read back.</summary>

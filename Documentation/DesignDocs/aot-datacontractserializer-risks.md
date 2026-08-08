@@ -437,6 +437,45 @@ terminates at run time on a nil or empty element rather than statically.
 
 ---
 
+## Falling back is visible, and still a fallback
+
+Both halves matter, and they are not in tension:
+
+- **The fallback stays.** `GetSerializer` returns null, `CanReadObject` stays false, CoreWCF uses the
+  reflection-based `DataContractSerializer`, and nothing breaks. That is what makes migrating
+  contract by contract possible.
+- **It is no longer silent.** A contract that falls back produces a build warning naming the reason.
+
+The second half is a change of mind, and worth recording as one. While the generated path was purely
+an optimization, silence was right: nothing was lost but speed. It is *not* only an optimization
+under Native AOT - the switch defaults on there precisely because the reflection path is the broken
+one - so a silent fallback is a build that looks clean and throws at run time.
+
+| Id | Severity | Fires when |
+| --- | --- | --- |
+| `COREWCF_0403` | Warning | No serializer was generated for a listed contract. |
+| `COREWCF_0404` | Warning | A listed contract is written by generated code but not read by it. |
+
+Three decisions inside that:
+
+- **Warning, not error.** The fallback is correct behaviour, and a build that fails on it would make
+  step-by-step migration impossible. `NoWarn` and EditorConfig work as usual for anyone who has
+  looked at one and accepted it.
+- **Reported on the type the user listed**, not on every contract reachable from it. A nested
+  contract that cannot be written makes its container unsupported too, so reporting both would bury
+  the one line they can act on under a cascade of consequences. The reason text carries the cause:
+  *"member 'Value' cannot be read back: App.Inner cannot be read back: member '_hidden' is not
+  public"*.
+- **Two ids, not one.** Half a fallback is a different situation: a service that only *returns* a
+  contract is unaffected by its read half, so the two are worth telling apart at a glance.
+
+The read-side answer is computed by the emitter rather than the parser, because readability is a
+property of the whole contract graph rather than of one contract - which is also why `IsReadable`
+became a function returning a *reason* rather than a bool. "It cannot be read" is not something
+anyone can act on.
+
+---
+
 ## Risk register
 
 Ordered by how much each threatens the milestone.
@@ -580,6 +619,20 @@ It cannot be a fallback: by the time the runtime type is known the member elemen
 Closing it means writing collections into an object member, which needs the collection contract
 naming rules the generator does not implement yet. `AllTypes.array1` is the corpus case waiting on
 it, though that contract is blocked on several other things too.
+
+### 5a. `ReadObject` is built but not yet called
+
+`PartInfo.WriteObject` prefers the generated serializer. `PartInfo.ReadObject` does not: it goes
+straight to `Serializer` and never consults `AotSerializer` or `CanReadObject`, so **every read runs
+through reflection today** regardless of what the generator produced.
+
+The read half is built and verified against the corpus - 79 of 86 cases reproduce their fixture - it
+is simply not reachable from CoreWCF yet. Closing this is one branch in `PartInfo`, mirroring the one
+`WriteObject` already has, plus the `CanReadObject` test that decides between them.
+
+Worth stating rather than assuming: until that branch exists, `COREWCF_0404` describes a property of
+the generated serializer rather than a difference in CoreWCF's behaviour, because nothing reads
+through it either way.
 
 ### 5. The seam has gaps this work does not close
 

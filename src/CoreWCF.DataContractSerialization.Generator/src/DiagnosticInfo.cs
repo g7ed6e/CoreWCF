@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -25,6 +25,13 @@ internal sealed record DiagnosticInfo(
         new(descriptor,
             symbol is not null && symbol.Locations.Length > 0 ? LocationInfo.From(symbol.Locations[0]) : null,
             new EquatableArray<string>(messageArguments));
+
+    /// <summary>Creates one from a location already reduced to values.</summary>
+    /// <remarks>
+    /// Used by the emitter, which sees no symbols at all - the location travels on the spec instead.
+    /// </remarks>
+    public static DiagnosticInfo Create(DiagnosticDescriptor descriptor, LocationInfo? location, params string[] messageArguments) =>
+        new(descriptor, location, new EquatableArray<string>(messageArguments));
 
     public Diagnostic ToDiagnostic() =>
         Diagnostic.Create(Descriptor, Location?.ToLocation(), ToObjectArray(MessageArguments));

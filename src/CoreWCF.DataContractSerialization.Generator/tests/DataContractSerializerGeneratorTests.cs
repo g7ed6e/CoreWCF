@@ -2,7 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Globalization;
 using System.Linq;
+using Microsoft.CodeAnalysis;
 using Xunit;
 
 namespace CoreWCF.DataContractSerialization.Generator.Tests
@@ -234,10 +236,12 @@ namespace App
         }
 
         [Fact]
-        public void UnsupportedMemberType_LeavesTheContractToReflection()
+        public void UnsupportedMemberType_LeavesTheContractToReflectionAndSaysSo()
         {
-            // Falling back is a correct outcome, so this is a recorded comment rather than a
-            // diagnostic - and no serializer is emitted, so GetSerializer returns null for it.
+            // Falling back stays a correct outcome - no serializer is emitted and GetSerializer
+            // returns null, so CoreWCF uses the reflection-based one and nothing breaks. What
+            // changed is that it is no longer silent: under Native AOT the fallback is the broken
+            // path, so a clean build that throws at run time is the worst of both.
             GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
     [DataContract]
     public class HasCollection
@@ -252,9 +256,89 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Empty(result.GeneratorDiagnostics);
             Assert.Contains("unsupported key or value type", result.SingleSource);
             Assert.DoesNotContain("if (type == typeof(global::App.HasCollection))", result.SingleSource);
+
+            Diagnostic diagnostic = Assert.Single(result.GeneratorDiagnostics);
+            Assert.Equal("COREWCF_0403", diagnostic.Id);
+            Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+
+            string message = diagnostic.GetMessage(CultureInfo.InvariantCulture);
+            Assert.Contains("App.HasCollection", message);
+
+            // The reason has to name the member, or it is not something anyone can act on.
+            Assert.Contains("'Values'", message);
+        }
+
+        [Fact]
+        public void ContractThatCanBeWrittenButNotRead_WarnsSeparately()
+        {
+            // Half a fallback, and worth its own id: a service that only returns this contract is
+            // unaffected, while one that accepts it is not.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class NoDefaultConstructor
+    {
+        public NoDefaultConstructor(int seed)
+        {
+            Value = seed;
+        }
+
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(NoDefaultConstructor))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // Still written by generated code - only the read half falls back.
+            Assert.Contains("if (type == typeof(global::App.NoDefaultConstructor))", result.SingleSource);
+            Assert.DoesNotContain("CanReadObject => true", result.SingleSource);
+
+            Diagnostic diagnostic = Assert.Single(result.GeneratorDiagnostics);
+            Assert.Equal("COREWCF_0404", diagnostic.Id);
+            Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+            Assert.Contains(
+                "no accessible parameterless constructor",
+                diagnostic.GetMessage(CultureInfo.InvariantCulture));
+        }
+
+        [Fact]
+        public void FallbackOfANestedContract_IsReportedOnceOnTheTypeThatWasListed()
+        {
+            // The container is unsupported because its member is, so reporting both would bury the
+            // one line the user can act on. The reason text carries the cause instead.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Inner
+    {
+        [DataMember] private int _hidden;
+    }
+
+    [DataContract]
+    public class Outer
+    {
+        [DataMember] public Inner Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Outer))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            Diagnostic diagnostic = Assert.Single(result.GeneratorDiagnostics);
+            Assert.Equal("COREWCF_0403", diagnostic.Id);
+
+            string message = diagnostic.GetMessage(CultureInfo.InvariantCulture);
+            Assert.Contains("App.Outer", message);
+            Assert.Contains("App.Inner", message);
         }
 
         [Fact]

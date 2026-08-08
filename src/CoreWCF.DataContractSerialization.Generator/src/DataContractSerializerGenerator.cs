@@ -1,9 +1,10 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace CoreWCF.DataContractSerialization.Generator;
 
@@ -72,7 +73,16 @@ public sealed partial class DataContractSerializerGenerator : IIncrementalGenera
             }
 
             Emitter emitter = new();
-            context.AddSource(contextSpec.HintName, emitter.Emit(contextSpec));
+            SourceText source = emitter.Emit(contextSpec);
+
+            // Reported after emitting, because whether a contract falls back is decided while the
+            // source is being built rather than while it is being parsed.
+            foreach (DiagnosticInfo diagnostic in emitter.Diagnostics)
+            {
+                context.ReportDiagnostic(diagnostic.ToDiagnostic());
+            }
+
+            context.AddSource(contextSpec.HintName, source);
         }
     }
 }
