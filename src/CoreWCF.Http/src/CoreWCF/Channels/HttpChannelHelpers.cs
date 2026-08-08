@@ -352,7 +352,7 @@ namespace CoreWCF.Channels
                 else
                 {
                     Stream stream = GetInputStream(true);
-                    reader = PipeReader.Create(stream, new StreamPipeReaderOptions(pool: _settings.BufferManager));
+                    reader = PipeReader.Create(stream);
                     if (_streamed)
                     {
                         message = await ReadStreamedMessageAsync(reader);

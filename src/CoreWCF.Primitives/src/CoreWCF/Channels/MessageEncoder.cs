@@ -4,7 +4,9 @@
 using System;
 using System.Buffers;
 using System.IO;
+using System.Linq;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Threading.Tasks;
 using CoreWCF.Diagnostics;
 using CoreWCF.Runtime;
@@ -13,6 +15,28 @@ namespace CoreWCF.Channels
 {
     public abstract class MessageEncoder
     {
+        private readonly bool _isAsyncImplementation;
+
+        protected MessageEncoder()
+        {
+            Type implementorType = GetType();
+            var methods = implementorType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+            // ReadMessageAsync is overloaded on (Stream, int, string) too, so the buffer overload
+            // is identified by the type of its first parameter.
+            var readMessageAsyncMethodInfo = (from method in methods
+                where method.Name == nameof(ReadMessageAsync)
+                let parameters = method.GetParameters()
+                where parameters.Length == 3
+                let firstParameter = parameters[0]
+                where firstParameter.ParameterType == typeof(ReadOnlySequence<byte>)
+                select method).SingleOrDefault();
+
+            var baseReadMessageAsyncMethodInfo = readMessageAsyncMethodInfo!.GetBaseDefinition();
+
+            _isAsyncImplementation = baseReadMessageAsyncMethodInfo.DeclaringType != readMessageAsyncMethodInfo.DeclaringType;
+        }
+
         public abstract string ContentType { get; }
 
         public abstract string MediaType { get; }
@@ -45,17 +69,24 @@ namespace CoreWCF.Channels
         [Obsolete("Implementers should override ReadMessageAsync(ReadOnlySequence<byte> buffer, string contentType).")]
         public virtual Message ReadMessage(ArraySegment<byte> buffer, BufferManager bufferManager, string contentType)
         {
+            if (!_isAsyncImplementation)
+            {
+                // Reaching the base implementation of both overloads means the encoder implements
+                // neither: forwarding on would bounce between the two until the stack runs out.
+                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
+                    new NotImplementedException(SR.Format(SR.MessageEncoderReadMessageNotImplemented, GetType())));
+            }
+
             return ReadMessageAsync(new ReadOnlySequence<byte>(buffer), bufferManager, contentType).AsTask().GetAwaiter().GetResult();
         }
 
-        public ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, MemoryPool<byte> memoryPool) => ReadMessageAsync(buffer, memoryPool, contentType: null);
+        public ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, BufferManager bufferManager) => ReadMessageAsync(buffer, bufferManager, contentType: null);
 
         // Default to forward the call to ReadMessage(ArraySegment<byte> buffer, BufferManager bufferManager, string contentType)
         // to support derived type implementations
-        public virtual ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, MemoryPool<byte> memoryPool, string contentType)
+        public virtual ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, BufferManager bufferManager, string contentType)
         {
             int bufferLength = (int)buffer.Length;
-            BufferManager bufferManager = memoryPool as InternalBufferManager;
             byte[] bytes = bufferManager.TakeBuffer(bufferLength);
             buffer.CopyTo(bytes.AsSpan(0, bufferLength));
 #pragma warning disable CS0612

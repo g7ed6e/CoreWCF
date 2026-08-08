@@ -66,16 +66,16 @@ namespace CoreWCF.Channels
             return Task.FromResult(message);
         }
 
-        public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, MemoryPool<byte> memoryPool, string contentType)
+        public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, BufferManager bufferManager, string contentType)
         {
             if (buffer.IsEmpty)
             {
                 throw Fx.Exception.Argument(nameof(buffer), SR.BufferCannotBeEmpty);
             }
 
-            if (memoryPool == null)
+            if (bufferManager == null)
             {
-                throw Fx.Exception.ArgumentNull(nameof(memoryPool));
+                throw Fx.Exception.ArgumentNull(nameof(bufferManager));
             }
 
             //if (TD.ByteStreamMessageDecodingStartIsEnabled())

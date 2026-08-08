@@ -1,14 +1,12 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
 
 namespace CoreWCF.Runtime
 {
-    internal abstract class InternalBufferManager : MemoryPool<byte>
+    internal abstract class InternalBufferManager
     {
         protected InternalBufferManager()
         {
@@ -31,14 +29,15 @@ namespace CoreWCF.Runtime
             }
         }
 
-        private sealed class PooledBufferManager : InternalBufferManager
+        private class PooledBufferManager : InternalBufferManager
         {
-            private const int MinBufferSize = 128;
-            private const int MaxMissesBeforeTuning = 8;
-            private const int InitialBufferCount = 1;
+            private const int minBufferSize = 128;
+            private const int maxMissesBeforeTuning = 8;
+            private const int initialBufferCount = 1;
             private readonly object _tuningLock;
             private readonly int[] _bufferSizes;
             private readonly BufferPool[] _bufferPools;
+            private readonly long _memoryLimit;
             private long _remainingMemory;
             private bool _areQuotasBeingTuned;
             private int _totalMisses;
@@ -46,19 +45,19 @@ namespace CoreWCF.Runtime
             public PooledBufferManager(long maxMemoryToPool, int maxBufferSize)
             {
                 _tuningLock = new object();
-                MaxBufferSize = maxBufferSize;
+                _memoryLimit = maxMemoryToPool;
                 _remainingMemory = maxMemoryToPool;
                 List<BufferPool> bufferPoolList = new List<BufferPool>();
 
-                for (int bufferSize = MinBufferSize; ;)
+                for (int bufferSize = minBufferSize; ;)
                 {
                     long bufferCountLong = _remainingMemory / bufferSize;
 
                     int bufferCount = bufferCountLong > int.MaxValue ? int.MaxValue : (int)bufferCountLong;
 
-                    if (bufferCount > InitialBufferCount)
+                    if (bufferCount > initialBufferCount)
                     {
-                        bufferCount = InitialBufferCount;
+                        bufferCount = initialBufferCount;
                     }
 
                     bufferPoolList.Add(BufferPool.CreatePool(bufferSize, bufferCount));
@@ -212,7 +211,7 @@ namespace CoreWCF.Runtime
                 }
             }
 
-           public override byte[] TakeBuffer(int bufferSize)
+            public override byte[] TakeBuffer(int bufferSize)
             {
                 Fx.Assert(bufferSize >= 0, "caller must ensure a non-negative argument");
 
@@ -231,7 +230,7 @@ namespace CoreWCF.Runtime
                         if (bufferPool.Peak == bufferPool.Limit)
                         {
                             bufferPool.Misses++;
-                            if (++_totalMisses >= MaxMissesBeforeTuning)
+                            if (++_totalMisses >= maxMissesBeforeTuning)
                             {
                                 TuneQuotas();
                             }
@@ -468,63 +467,15 @@ namespace CoreWCF.Runtime
                     }
                 }
             }
-
-            private sealed class PooledBufferManagerMemoryOwner : IMemoryOwner<byte>, IDisposable
-            {
-                private readonly PooledBufferManager _bufferManager;
-                private byte[] _array;
-
-                public PooledBufferManagerMemoryOwner(int size, PooledBufferManager bufferManager)
-                {
-                    _bufferManager = bufferManager;
-                    _array =  bufferManager.TakeBuffer(size);
-                }
-
-                public Memory<byte> Memory
-                {
-                    get
-                    {
-                        byte[] array = _array;
-                        if (array == null)
-                        {
-                            // ThrowHelper.ThrowObjectDisposedException_ArrayMemoryPoolBuffer();
-                            throw new NotSupportedException();
-                        }
-
-                        return new Memory<byte>(array);
-                    }
-                }
-
-                public void Dispose()
-                {
-                    byte[] array = _array;
-                    if (array == null)
-                        return;
-                    _array = null;
-                    _bufferManager.ReturnBuffer(array);
-                }
-            }
-
-            public override IMemoryOwner<byte> Rent(int minBufferSize = -1)
-            {
-                return new PooledBufferManagerMemoryOwner(minBufferSize, this);
-            }
-
-            protected override void Dispose(bool disposing)
-            {
-
-            }
-
-            public override int MaxBufferSize { get; }
         }
 
-        private sealed class GCBufferManager : InternalBufferManager
+        private class GCBufferManager : InternalBufferManager
         {
             private GCBufferManager()
             {
             }
 
-            public static GCBufferManager Value { get; } = new();
+            public static GCBufferManager Value { get; } = new GCBufferManager();
 
             public override void Clear()
             {
@@ -538,53 +489,6 @@ namespace CoreWCF.Runtime
             public override void ReturnBuffer(byte[] buffer)
             {
                 // do nothing, GC will reclaim this buffer
-            }
-
-            public override IMemoryOwner<byte> Rent(int minBufferSize = -1)
-            {
-                return new GCMemoryOwner(minBufferSize, this);
-            }
-
-            protected override void Dispose(bool disposing)
-            {
-
-            }
-
-            public override int MaxBufferSize => int.MaxValue;
-
-            private sealed class GCMemoryOwner : IMemoryOwner<byte>, IDisposable
-            {
-                private readonly GCBufferManager _bufferManager;
-                private byte[] _array;
-
-                public GCMemoryOwner(int size, GCBufferManager bufferManager)
-                {
-                    _bufferManager = bufferManager;
-                    _array =  bufferManager.TakeBuffer(size);
-                }
-
-                public Memory<byte> Memory
-                {
-                    get
-                    {
-                        byte[] array = _array;
-                        if (array == null)
-                        {
-                            // ThrowHelper.ThrowObjectDisposedException_ArrayMemoryPoolBuffer();
-                            throw new NotSupportedException();
-                        }
-
-                        return new Memory<byte>(array);
-                    }
-                }
-
-                public void Dispose()
-                {
-                    byte[] array = _array;
-                    if (array == null)
-                        return;
-                    _array = null;
-                }
             }
         }
     }

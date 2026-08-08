@@ -566,18 +566,17 @@ namespace CoreWCF.Channels
                 return messageData.Slice(headerSize + dictionarySize);
             }
 
-            public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, MemoryPool<byte> memoryPool, string contentType)
+            public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, BufferManager bufferManager, string contentType)
             {
-                if (memoryPool == null)
+                if (bufferManager == null)
                 {
-                    throw Fx.Exception.ArgumentNull(nameof(memoryPool));
+                    throw Fx.Exception.ArgumentNull(nameof(bufferManager));
                 }
 
                 CompressionFormat compressionFormat = CheckContentType(contentType);
 
                 if (compressionFormat != CompressionFormat.None)
                 {
-                    BufferManager bufferManager = memoryPool as InternalBufferManager;
                     buffer = MessageEncoderCompressionHandler.DecompressBuffer(buffer, bufferManager, compressionFormat, _maxReceivedMessageSize);
                 }
 

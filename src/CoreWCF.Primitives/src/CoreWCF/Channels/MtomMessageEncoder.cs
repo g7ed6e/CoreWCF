@@ -361,11 +361,11 @@ namespace CoreWCF.Channels
             return (_version.Envelope == EnvelopeVersion.Soap12) ? TextMessageEncoderFactory.Soap12MediaType : TextMessageEncoderFactory.Soap11MediaType;
         }
 
-        public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, MemoryPool<byte> memoryPool, string contentType)
+        public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, BufferManager bufferManager, string contentType)
         {
-            if (memoryPool == null)
+            if (bufferManager == null)
             {
-                throw Fx.Exception.ArgumentNull(nameof(memoryPool));
+                throw Fx.Exception.ArgumentNull(nameof(bufferManager));
             }
 
             if (contentType == ContentType)
