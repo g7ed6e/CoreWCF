@@ -6,6 +6,7 @@ using System.Buffers;
 using System.IO;
 using System.IO.Compression;
 using System.IO.Pipelines;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using CoreWCF.Runtime;
 
@@ -35,6 +36,16 @@ namespace CoreWCF.Channels
                     bufferManager);
             gZipStream.CopyTo(bufferedOutStream);
             byte[] decompressedBytes = bufferedOutStream.ToArray(out int length);
+
+            // The compressed input has been fully consumed and the caller reads from the
+            // decompressed array from here on, so its array goes back to the pool now.
+            if (buffer.IsSingleSegment
+                && MemoryMarshal.TryGetArray(buffer.First, out ArraySegment<byte> compressed)
+                && compressed.Array != null)
+            {
+                bufferManager.ReturnBuffer(compressed.Array);
+            }
+
             return new ReadOnlySequence<byte>(decompressedBytes, 0, length);
         }
 

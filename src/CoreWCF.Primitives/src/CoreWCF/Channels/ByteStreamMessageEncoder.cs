@@ -79,6 +79,7 @@ namespace CoreWCF.Channels
             //}
 
             var messageData = new ByteStreamBufferedMessageData(buffer);
+            messageData.OwnBuffer(buffer, bufferManager);
 
             Message message = ByteStreamMessage.CreateMessage(messageData, _bufferedReadReaderQuotas, _moveBodyReaderToContent);
             message.Properties.Encoder = this;

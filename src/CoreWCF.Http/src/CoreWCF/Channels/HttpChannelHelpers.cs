@@ -361,6 +361,7 @@ namespace CoreWCF.Channels
         public async Task<(Message message, Exception requestException, PipeReader reader)> ParseIncomingMessageAsync()
         {
             bool throwing = true;
+            PipeReader reader = null;
             try
             {
                 await CheckForContentAsync();
@@ -368,7 +369,6 @@ namespace CoreWCF.Channels
 
                 Exception requestException;
                 Message message;
-                PipeReader reader = null;
 
                 if (!HasContent)
                 {
@@ -404,6 +404,13 @@ namespace CoreWCF.Channels
             {
                 if (throwing)
                 {
+                    // Only the reader handed back to the caller gets completed there, so one created
+                    // before the failure has to be completed here or its buffers are never released.
+                    if (reader is not null)
+                    {
+                        await reader.CompleteAsync();
+                    }
+
                     Close();
                 }
             }

@@ -3,6 +3,7 @@
 
 using System;
 using System.Buffers;
+using System.Runtime.InteropServices;
 using System.IO;
 using System.IO.Pipelines;
 using CoreWCF.Runtime;
@@ -23,14 +24,21 @@ namespace CoreWCF.Channels
         }
 
         /// <summary>
-        /// The buffer is a single array rented from <paramref name="bufferManager"/>; it is handed
-        /// back once the last reference to this instance is released.
+        /// Hands ownership of <paramref name="rentedBuffer"/> to this instance: the array behind it
+        /// goes back to <paramref name="bufferManager"/> once the last reference is released.
+        /// Callers reading out of memory they don't own never call this.
         /// </summary>
-        public ByteStreamBufferedMessageData(ArraySegment<byte> buffer, BufferManager bufferManager)
-            : this(new ReadOnlySequence<byte>(buffer.Array, buffer.Offset, buffer.Count))
+        public void OwnBuffer(ReadOnlySequence<byte> rentedBuffer, BufferManager bufferManager)
         {
-            _bufferManager = bufferManager;
-            _rentedBuffer = buffer.Array;
+            if (bufferManager != null
+                && !rentedBuffer.IsEmpty
+                && rentedBuffer.IsSingleSegment
+                && MemoryMarshal.TryGetArray(rentedBuffer.First, out ArraySegment<byte> segment)
+                && segment.Array != null)
+            {
+                _rentedBuffer = segment.Array;
+                _bufferManager = bufferManager;
+            }
         }
 
         private bool IsClosed => _refCount < 0;

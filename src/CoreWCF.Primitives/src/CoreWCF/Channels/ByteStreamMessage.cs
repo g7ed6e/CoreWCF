@@ -35,7 +35,8 @@ namespace CoreWCF.Channels
                 throw Fx.Exception.ArgumentNull("buffer.Array", SR.Format(SR.ArgumentPropertyShouldNotBeNullError, "buffer.Array"));
             }
 
-            ByteStreamBufferedMessageData data = new(buffer, bufferManager);
+            ByteStreamBufferedMessageData data = new(new ReadOnlySequence<byte>(buffer.Array, buffer.Offset, buffer.Count));
+            data.OwnBuffer(data.ReadOnlyBuffer, bufferManager);
 
             // moveBodyReaderToContent is true, for consistency with the other implementations of Message (including the Message base class itself)
             return CreateMessage(data, XmlDictionaryReaderQuotas.Max, true);

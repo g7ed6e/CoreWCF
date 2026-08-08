@@ -188,6 +188,7 @@ namespace CoreWCF.Channels
         public void OwnBuffer(ReadOnlySequence<byte> rentedBuffer, BufferManager bufferManager)
         {
             if (bufferManager != null
+                && !rentedBuffer.IsEmpty
                 && rentedBuffer.IsSingleSegment
                 && MemoryMarshal.TryGetArray(rentedBuffer.First, out ArraySegment<byte> segment)
                 && segment.Array != null)

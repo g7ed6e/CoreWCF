@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -31,6 +31,15 @@ namespace CoreWCF.Primitives.Tests
         private static byte[] Payload(int length)
             => Enumerable.Range(0, length).Select(i => (byte)(i % 251)).ToArray();
 
+        // The encoder takes ownership of a single segment buffer and hands it back to the manager
+        // when the message closes, so it has to have come from that manager in the first place.
+        private static ReadOnlySequence<byte> Rent(BufferManager bufferManager, byte[] payload, int offset = 0)
+        {
+            byte[] rented = bufferManager.TakeBuffer(offset + payload.Length);
+            payload.CopyTo(rented, offset);
+            return new ReadOnlySequence<byte>(rented, offset, payload.Length);
+        }
+
         [Fact]
         public async Task MultiSegmentSequence_GetBodyReturnsEveryByte()
         {
@@ -59,8 +68,9 @@ namespace CoreWCF.Primitives.Tests
         public async Task SingleSegmentSequence_ReadInChunks_ReturnsEachByteOnce()
         {
             byte[] expected = Payload(300);
+            BufferManager bufferManager = BufferManager;
 
-            Message message = await Encoder.ReadMessageAsync(new ReadOnlySequence<byte>(expected), BufferManager, ContentType);
+            Message message = await Encoder.ReadMessageAsync(Rent(bufferManager, expected), bufferManager, ContentType);
 
             Assert.Equal(expected, ReadBodyInChunks(message, chunkSize: 37));
         }
@@ -70,12 +80,12 @@ namespace CoreWCF.Primitives.Tests
         {
             // A sequence whose Start is not at index 0 of its first segment: the reader must treat
             // positions as relative to the sequence, not to the underlying segment.
-            byte[] backing = Payload(300);
             const int offset = 91;
-            byte[] expected = backing.Skip(offset).ToArray();
+            byte[] expected = Payload(209);
+            BufferManager bufferManager = BufferManager;
 
             Message message = await Encoder.ReadMessageAsync(
-                new ReadOnlySequence<byte>(backing, offset, backing.Length - offset), BufferManager, ContentType);
+                Rent(bufferManager, expected, offset), bufferManager, ContentType);
 
             Assert.Equal(expected, ReadBodyInChunks(message, chunkSize: 37));
         }

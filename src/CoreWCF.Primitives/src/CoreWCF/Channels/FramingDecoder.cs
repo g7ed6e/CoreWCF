@@ -55,8 +55,11 @@ namespace CoreWCF.Channels
             }
 
             int bytesConsumed = 0;
+            // Captured up front: the loop slices buffer as it goes, so using its length as the
+            // budget would shrink the budget with every byte read and stop short of the value.
+            int size = (int)buffer.Length;
 
-            while (bytesConsumed < buffer.Length)
+            while (bytesConsumed < size)
             {
                 ReadOnlySpan<byte> data = buffer.First.Span;
                 int next = data[0];
