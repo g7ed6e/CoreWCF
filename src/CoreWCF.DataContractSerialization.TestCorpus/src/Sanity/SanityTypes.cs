@@ -350,6 +350,51 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
         }
     }
 
+#if !NETFRAMEWORK
+    /// <summary>
+    /// <c>DateOnly</c> and <c>TimeOnly</c>, whose wire format changed between runtimes.
+    /// </summary>
+    /// <remarks>
+    /// Up to .NET 9 DataContractSerializer had no idea what these were and wrote them as a contract
+    /// with no members - an empty element that drops the value entirely. .NET 10 writes them as
+    /// primitives. The upstream DateTimeOnlyWrapper only ever holds default values, so it cannot
+    /// tell a lost value from a zero one; this type carries real ones so the fixture records the
+    /// actual format on each runtime.
+    /// </remarks>
+    [DataContract]
+    public class SanityDateAndTimeOnly
+    {
+        [DataMember]
+        public DateOnly Date { get; set; }
+
+        [DataMember]
+        public TimeOnly Time { get; set; }
+
+        [DataMember]
+        public TimeOnly Precise { get; set; }
+
+        [DataMember]
+        public DateOnly? NullableDate { get; set; }
+
+        [DataMember]
+        public TimeOnly? MissingTime { get; set; }
+
+        public static SanityDateAndTimeOnly Populated()
+        {
+            return new SanityDateAndTimeOnly
+            {
+                Date = new DateOnly(2020, 1, 2),
+                Time = new TimeOnly(3, 4, 5),
+
+                // Sub-second precision, so the fixture records how far the format goes.
+                Precise = new TimeOnly(6, 7, 8, 9),
+                NullableDate = new DateOnly(2021, 11, 12),
+                MissingTime = null
+            };
+        }
+    }
+#endif
+
     /// <summary>
     /// <c>Uri</c> and <c>DateTimeOffset</c>, neither of which is what it looks like on the wire.
     /// </summary>

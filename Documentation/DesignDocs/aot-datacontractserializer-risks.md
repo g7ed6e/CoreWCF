@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, and jagged arrays. **72 of 78** corpus cases byte-match; the rest report unsupported and skip. |
-| **M4+ — deferred** | `DateOnly`/`TimeOnly`, implicit (no-attribute) contracts, `[KnownType]` naming a method, non-public data members, `ISerializable`, `ReadObject`, and the seam gaps below. Of the six cases still skipping, only `DateOnly`/`TimeOnly` is a capability; the other five are deliberate v1 exclusions or things a generator cannot reach. |
+| **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **74 of 80** corpus cases byte-match; the six that skip are all deliberate exclusions. |
+| **M4+ — deferred** | `ReadObject` and the seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
 
@@ -120,6 +120,31 @@ Two restrictions the generator adds, both to avoid claiming more than it can del
 
 Non-public fields still decline, for the reason they always did: generated code lives in the
 context's class and cannot reach another type's privates, however close by they are compiled.
+
+### `DateOnly` and `TimeOnly` — the one format decided by the runtime
+
+Every other rule here is a property of the contract. These two are a property of the **runtime**:
+
+- Up to **.NET 9** the serializer does not recognise them and writes a contract with no members —
+  an empty element that drops the value entirely, with the `System` namespace declared on it.
+- **.NET 10** writes them as primitives: `yyyy-MM-dd` for a date, `HH:mm:ss.FFFFFFF` for a time
+  (optional fractional digits, so trailing zeros and the dot are omitted), and no namespace
+  declaration at all.
+
+It is genuinely runtime-determined and not target-framework-determined, which was **verified rather
+than assumed**: running the net8.0 test assembly under `DOTNET_ROLL_FORWARD=LatestMajor` makes the
+reflection serializer produce the .NET 10 format. So the generator emits a runtime test
+(`Environment.Version.Major >= 10`) rather than deciding at compile time.
+
+That distinction has teeth. With a compile-time decision, a net8.0 assembly rolled forward onto
+.NET 10 would emit the old format while the reflection path emitted the new one — and the harness
+would not have caught it, because the generated provider would have kept matching its own stale
+baseline. With the runtime test, the same roll-forward run fails **both** providers on exactly the
+same two cases, which is the fixtures being keyed to the compile-time framework and not a defect.
+
+The upstream `DateTimeOnlyWrapper` only ever holds default values, so it cannot tell a dropped value
+from a zero one. `SanityDateAndTimeOnly` carries real ones, which is what makes the pre-.NET 10 data
+loss visible in the fixture: a `DateOnly` of 2020-01-02 records as `<a:Date/>`.
 
 ### Object identity, as `IsReference` defines it
 

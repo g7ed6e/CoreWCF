@@ -597,7 +597,9 @@ public sealed partial class DataContractSerializerGenerator
 
                     // Its two members live in the System namespace, so the member element declares
                     // it exactly as it would for any other contract in a different namespace.
-                    MemberKind.DateTimeOffset =>
+                    // DateOnly and TimeOnly declare it too, but only on the runtimes that do not
+                    // know what they are - see the conditional the emitter puts around it.
+                    MemberKind.DateTimeOffset or MemberKind.DateOnly or MemberKind.TimeOnly =>
                         SystemContractNamespace != contractNamespace ? SystemContractNamespace : null,
 
                     _ => ChildNamespaceToDeclare(memberType, contractNamespace)
@@ -1290,6 +1292,10 @@ public sealed partial class DataContractSerializerGenerator
                     return MemberKind.TimeSpan;
                 case "System.Uri":
                     return isNullableValueType ? MemberKind.Unsupported : MemberKind.Uri;
+                case "System.DateOnly":
+                    return MemberKind.DateOnly;
+                case "System.TimeOnly":
+                    return MemberKind.TimeOnly;
                 case "System.Xml.XmlQualifiedName":
                     return isNullableValueType ? MemberKind.Unsupported : MemberKind.QName;
                 case "System.DateTimeOffset":

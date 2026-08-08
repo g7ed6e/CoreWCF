@@ -37,6 +37,9 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
     [DataContractSerializable(typeof(SanityPrimitiveArrays))]
     [DataContractSerializable(typeof(SanityBoxedPrimitives))]
     [DataContractSerializable(typeof(SanityUriAndOffset))]
+#if !NETFRAMEWORK
+    [DataContractSerializable(typeof(SanityDateAndTimeOnly))]
+#endif
     [DataContractSerializable(typeof(SanityEnums))]
     [DataContractSerializable(typeof(SanityNullable))]
     [DataContractSerializable(typeof(SanityDerived))]

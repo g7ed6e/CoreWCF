@@ -789,6 +789,40 @@ namespace App
         }
 
         [Fact]
+        public void DateOnlyAndTimeOnlyMembers_DecideTheirFormatAtRunTime()
+        {
+            // The only members whose wire format is decided by the runtime rather than the contract.
+            // Up to .NET 9 the serializer did not recognise them and wrote a memberless contract -
+            // an empty element that drops the value - and .NET 10 writes them as primitives. A
+            // net8.0 assembly run on .NET 10 produces the .NET 10 format, so the choice cannot be
+            // made at compile time.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Schedule
+    {
+        [DataMember] public System.DateOnly Day { get; set; }
+        [DataMember] public System.TimeOnly At { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Schedule))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("global::System.Environment.Version.Major >= 10;", result.SingleSource);
+
+            // Optional fractional digits, so trailing zeros and the dot are omitted rather than
+            // padded - matching XmlWriterDelegator.
+            Assert.Contains("value.ToString(\"yyyy-MM-dd\", global::System.Globalization.CultureInfo.InvariantCulture)", result.SingleSource);
+            Assert.Contains("value.ToString(\"HH:mm:ss.FFFFFFF\", global::System.Globalization.CultureInfo.InvariantCulture)", result.SingleSource);
+
+            // The System namespace is declared only where the serializer does not recognise them.
+            Assert.Contains("if (!__DateOnlyIsPrimitive)", result.SingleSource);
+        }
+
+        [Fact]
         public void JaggedArrayMember_WrapsEachInnerArrayInAnArrayOfElement()
         {
             // Each outer item is an array in its own right, written as ArrayOf plus the XSD name of

@@ -36,6 +36,13 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
             builder.Add<SanityPrimitiveArrays>("populated", SanityPrimitiveArrays.Populated)
                    .WithTags("collections", "primitives");
 
+#if !NETFRAMEWORK
+            // DateOnly and TimeOnly do not exist on .NET Framework, so the type is guarded and this
+            // registration carries the same condition.
+            builder.Add<SanityDateAndTimeOnly>("populated", SanityDateAndTimeOnly.Populated)
+                   .WithTags("primitives", "runtime-specific");
+#endif
+
             builder.Add<SanityUriAndOffset>("populated", SanityUriAndOffset.Populated)
                    .WithTags("primitives", "namespaces");
 

@@ -40,6 +40,7 @@ public sealed partial class DataContractSerializerGenerator
         private const string SchemaNamespace = "http://www.w3.org/2001/XMLSchema";
         private const string SystemContractNamespace = Parser.SystemContractNamespace;
         private const string ReferenceScope = "__ReferenceScope";
+        private const string DateOnlyIsPrimitive = "__DateOnlyIsPrimitive";
 
         private readonly StringBuilder _builder = new();
         private readonly Dictionary<string, int> _contractIndexes = new(StringComparer.Ordinal);
@@ -91,6 +92,7 @@ public sealed partial class DataContractSerializerGenerator
             EmitNilHelper(indentor);
             EmitDateTimeOffsetHelper(indentor);
             EmitQNameHelper(indentor);
+            EmitDateOnlyHelpers(indentor);
             EmitAnyTypeHelper(indentor);
             EmitReferenceScope(indentor);
 
@@ -442,7 +444,25 @@ public sealed partial class DataContractSerializerGenerator
             // puts xmlns:b on the member element.
             if (member.ChildNamespaceToDeclare is string childNamespace)
             {
+                // DateOnly and TimeOnly only declare it where the serializer does not recognise
+                // them and falls back to writing a memberless contract. Where it does, they are
+                // primitives and the element carries nothing but its value.
+                bool onlyWhenUnrecognised = member.Kind is MemberKind.DateOnly or MemberKind.TimeOnly;
+
+                if (onlyWhenUnrecognised)
+                {
+                    _builder.AppendLine($"{indentor}if (!{DateOnlyIsPrimitive})");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                }
+
                 _builder.AppendLine($"{indentor}writer.WriteXmlnsAttribute(null, {Literal(childNamespace)});");
+
+                if (onlyWhenUnrecognised)
+                {
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                }
             }
 
             if (canBeNull)
@@ -976,6 +996,8 @@ public sealed partial class DataContractSerializerGenerator
 
             MemberKind.DateTimeOffset => $"WriteDateTimeOffset(writer, {value});",
             MemberKind.QName => $"WriteQName(writer, {value});",
+            MemberKind.DateOnly => $"WriteDateOnly(writer, {value});",
+            MemberKind.TimeOnly => $"WriteTimeOnly(writer, {value});",
             _ => $"writer.WriteValue({value});"
         };
 
@@ -1304,6 +1326,58 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Increment();
             _builder.AppendLine($"{indentor}\"Type '\" + __runtimeType.FullName + \"' cannot be written as an untyped array item.\");");
             indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the <c>DateOnly</c> and <c>TimeOnly</c> writers, and the runtime test they depend on.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// These two are the only members whose wire format is decided by the runtime rather than
+        /// the contract. Up to .NET 9 DataContractSerializer did not recognise them and wrote a
+        /// contract with no members - an empty element that drops the value entirely. .NET 10 writes
+        /// them as primitives. Verified to be a runtime difference and not a target-framework one:
+        /// a net8.0 assembly run on .NET 10 produces the .NET 10 format, so a compile-time decision
+        /// would be wrong under roll-forward.
+        /// </para>
+        /// <para>
+        /// The formats are XmlWriterDelegator's: "yyyy-MM-dd" for a date, and "HH:mm:ss.FFFFFFF"
+        /// for a time - optional fractional digits, so trailing zeros and the separating dot are
+        /// omitted rather than padded.
+        /// </para>
+        /// </remarks>
+        private void EmitDateOnlyHelpers(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <summary>Whether this runtime writes DateOnly and TimeOnly as primitives.</summary>");
+            _builder.AppendLine($"{indentor}private static readonly bool {DateOnlyIsPrimitive} =");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}global::System.Environment.Version.Major >= 10;");
+            indentor.Decrement();
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void WriteDateOnly({DictionaryWriter} writer, global::System.DateOnly value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if ({DateOnlyIsPrimitive})");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteString(value.ToString(\"yyyy-MM-dd\", global::System.Globalization.CultureInfo.InvariantCulture));");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void WriteTimeOnly({DictionaryWriter} writer, global::System.TimeOnly value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if ({DateOnlyIsPrimitive})");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteString(value.ToString(\"HH:mm:ss.FFFFFFF\", global::System.Globalization.CultureInfo.InvariantCulture));");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
             indentor.Decrement();

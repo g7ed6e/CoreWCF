@@ -236,6 +236,14 @@ public sealed partial class DataContractSerializerGenerator
         Uri,
 
         /// <summary>
+        /// <c>DateOnly</c>, whose wire format depends on the runtime rather than the contract.
+        /// </summary>
+        DateOnly,
+
+        /// <summary><c>TimeOnly</c>, with the same runtime dependence as DateOnly.</summary>
+        TimeOnly,
+
+        /// <summary>
         /// <c>XmlQualifiedName</c>, the one member type whose element carries a prefix of its own.
         /// </summary>
         QName,
