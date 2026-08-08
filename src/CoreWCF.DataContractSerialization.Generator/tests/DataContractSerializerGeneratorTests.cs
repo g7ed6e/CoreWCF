@@ -375,6 +375,100 @@ namespace App
         }
 
         [Fact]
+        public void DateTimeOffsetMember_ReadsBackThroughTheAdapterContract()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.DateTimeOffset When { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // The two members of the adapter contract, in the namespace neither type mentions.
+            Assert.Contains("reader.LocalName == \"DateTime\"", result.SingleSource);
+            Assert.Contains("reader.LocalName == \"OffsetMinutes\"", result.SingleSource);
+            Assert.Contains(
+                "reader.NamespaceURI == \"http://schemas.datacontract.org/2004/07/System\"",
+                result.SingleSource);
+
+            // Mirrors DateTimeOffsetAdapter.GetDateTimeOffset: an Unspecified DateTime is paired
+            // with the offset, anything else is converted to it. The writer recorded UtcDateTime and
+            // the offset separately, so treating both the same way would shift every value that
+            // carries an offset by that offset.
+            Assert.Contains("__dateTime.Kind == global::System.DateTimeKind.Unspecified", result.SingleSource);
+            Assert.Contains("new global::System.DateTimeOffset(__dateTime).ToOffset(__offset)", result.SingleSource);
+        }
+
+        [Fact]
+        public void XmlQualifiedNameMember_ResolvesItsPrefixBeforeTheElementCloses()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.Xml.XmlQualifiedName Name { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // ReadElementContentAsString would consume the end tag and pop the scope that declares
+            // the prefix, leaving nothing to resolve against - so the read is split the way
+            // XmlReaderDelegator.ReadElementContentAsQName splits it.
+            Assert.Contains("reader.ReadContentAsString();", result.SingleSource);
+            Assert.Contains("reader.LookupNamespace(__prefix);", result.SingleSource);
+
+            // The writer emits no content at all for the empty name, so an empty element is how it
+            // comes back.
+            Assert.Contains("return global::System.Xml.XmlQualifiedName.Empty;", result.SingleSource);
+        }
+
+        [Fact]
+        public void NullXmlQualifiedNameMember_DoesNotGetItsOwnPrefix()
+        {
+            // The prefix belongs to the path that writes a value; a null member is written by
+            // WriteNull, which opens the element with whatever prefix is already bound. Both halves
+            // are pinned by fixtures - SanityQualifiedNames records the null case, AllTypes the
+            // value case - and getting it wrong costs a byte-exact match on one of them.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.Xml.XmlQualifiedName Name { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            int nullBranch = result.SingleSource.IndexOf("if (value.Name == null)", StringComparison.Ordinal);
+            Assert.True(nullBranch > 0, "The member element should be opened from a null test.");
+
+            string opening = result.SingleSource.Substring(nullBranch, 400);
+            int plain = opening.IndexOf("writer.WriteStartElement(\"Name\"", StringComparison.Ordinal);
+            int prefixed = opening.IndexOf("writer.WriteStartElement(\"q\", \"Name\"", StringComparison.Ordinal);
+
+            Assert.True(plain > 0 && prefixed > plain, "The unprefixed element belongs to the null branch.");
+        }
+
+        [Fact]
         public void DictionaryMember_ReadsEachEntryByKeyAndValue()
         {
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"

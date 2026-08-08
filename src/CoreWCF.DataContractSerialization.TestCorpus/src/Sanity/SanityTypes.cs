@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.Serialization;
+using System.Xml;
 
 namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
 {
@@ -590,6 +591,38 @@ namespace CoreWCF.DataContractSerialization.TestCorpus.Sanity
                 Plain = SanityEnum.Second,
                 Flags = SanityFlagsEnum.Alpha | SanityFlagsEnum.Gamma,
                 Renamed = SanityRenamedEnum.One
+            };
+        }
+    }
+
+    /// <summary>
+    /// <c>XmlQualifiedName</c>, the one member type whose element carries a prefix of its own.
+    /// </summary>
+    /// <remarks>
+    /// The prefix is declared on the member element and nowhere else, so the value cannot be read
+    /// back from the text alone - the element that defines the prefix has to still be open. The
+    /// empty name is a separate shape again: the writer emits no content for it at all, so it comes
+    /// back as an empty element rather than as an empty string.
+    /// </remarks>
+    [DataContract]
+    public class SanityQualifiedNames
+    {
+        [DataMember]
+        public XmlQualifiedName Named { get; set; }
+
+        [DataMember]
+        public XmlQualifiedName EmptyName { get; set; }
+
+        [DataMember]
+        public XmlQualifiedName MissingName { get; set; }
+
+        public static SanityQualifiedNames Populated()
+        {
+            return new SanityQualifiedNames
+            {
+                Named = new XmlQualifiedName("WCF", "http://corewcf.example/schema"),
+                EmptyName = XmlQualifiedName.Empty,
+                MissingName = null
             };
         }
     }

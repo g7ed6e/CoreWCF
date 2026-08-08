@@ -93,7 +93,9 @@ public sealed partial class DataContractSerializerGenerator
             EmitCoversKnownTypes(indentor, context);
             EmitNilHelper(indentor);
             EmitDateTimeOffsetHelper(indentor);
+            EmitDateTimeOffsetReadHelper(indentor);
             EmitQNameHelper(indentor);
+            EmitQNameReadHelper(indentor);
             EmitDateOnlyHelpers(indentor);
             EmitReadHelpers(indentor);
             EmitAnyTypeHelper(indentor);
@@ -512,13 +514,33 @@ public sealed partial class DataContractSerializerGenerator
             // and only when the namespace is non-empty. The result is a second prefix bound to the
             // contract's namespace alongside the one already in scope, which looks redundant and is
             // what the serializer does.
-            if (member.Kind == MemberKind.QName && contract.ContractNamespace.Length > 0)
+            //
+            // A null one does not get it. The prefix belongs to the path that writes a value, and a
+            // null member never reaches it - it is written by WriteNull, which opens the element
+            // with whatever prefix is already bound. Both halves are pinned by fixtures:
+            // SanityQualifiedNames records the null case and AllTypes the value case.
+            bool needsPrefix = member.Kind == MemberKind.QName && contract.ContractNamespace.Length > 0;
+            string prefixed = $"writer.WriteStartElement(\"q\", {name}, {Literal(contract.ContractNamespace)});";
+            string plain = $"writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});";
+
+            if (needsPrefix && canBeNull)
             {
-                _builder.AppendLine($"{indentor}writer.WriteStartElement(\"q\", {name}, {Literal(contract.ContractNamespace)});");
+                _builder.AppendLine($"{indentor}if ({access} == null)");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}{plain}");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}{prefixed}");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
             }
             else
             {
-                _builder.AppendLine($"{indentor}writer.WriteStartElement({name}, {Literal(contract.ContractNamespace)});");
+                _builder.AppendLine($"{indentor}{(needsPrefix ? prefixed : plain)}");
             }
 
             // A member whose type lives in a different contract namespace declares it here rather
@@ -1442,6 +1464,148 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits the reader for <c>DateTimeOffset</c>, the inverse of the adapter contract.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors DateTimeOffsetAdapter.GetDateTimeOffset. An Unspecified DateTime is paired with
+        /// the offset as it stands; anything else is converted to it, because the writer recorded
+        /// UtcDateTime and the offset separately rather than a local time. Doing the same thing for
+        /// both would shift every value that carries an offset by that offset.
+        /// </remarks>
+        private void EmitDateTimeOffsetReadHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static global::System.DateTimeOffset ReadDateTimeOffset({DictionaryReader} reader)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}global::System.DateTime __dateTime = default;");
+            _builder.AppendLine($"{indentor}short __offsetMinutes = 0;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}int __part = -1;");
+            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (__part < 0");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}&& reader.LocalName == \"DateTime\"");
+            _builder.AppendLine($"{indentor}&& reader.NamespaceURI == {Literal(SystemContractNamespace)})");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}__dateTime = {ReadValueExpression(MemberKind.DateTime, "reader.ReadElementContentAsString()")};");
+            _builder.AppendLine($"{indentor}__part = 0;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else if (__part < 1");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}&& reader.LocalName == \"OffsetMinutes\"");
+            _builder.AppendLine($"{indentor}&& reader.NamespaceURI == {Literal(SystemContractNamespace)})");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}__offsetMinutes = {ReadValueExpression(MemberKind.Int16, "reader.ReadElementContentAsString()")};");
+            _builder.AppendLine($"{indentor}__part = 1;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}global::System.TimeSpan __offset = new global::System.TimeSpan(0, __offsetMinutes, 0);");
+            _builder.AppendLine($"{indentor}return __dateTime.Kind == global::System.DateTimeKind.Unspecified");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}? new global::System.DateTimeOffset(__dateTime, __offset)");
+            _builder.AppendLine($"{indentor}: new global::System.DateTimeOffset(__dateTime).ToOffset(__offset);");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits the reader for an <c>XmlQualifiedName</c> value.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors XmlReaderDelegator.ReadElementContentAsQName, and the shape matters: the prefix
+        /// is declared on the element the writer opened, so it has to be resolved before that
+        /// element's end tag is consumed and its scope popped. Reading the text and the end tag in
+        /// one call - ReadElementContentAsString - would leave nothing to resolve against.
+        /// </remarks>
+        private void EmitQNameReadHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static global::System.Xml.XmlQualifiedName ReadQName({DictionaryReader} reader)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            // The writer emits nothing at all for the empty name, so an empty element is how it
+            // comes back - not an empty string that happens to parse to the same thing.
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            _builder.AppendLine($"{indentor}return global::System.Xml.XmlQualifiedName.Empty;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}string __text = reader.ReadContentAsString();");
+            _builder.AppendLine($"{indentor}global::System.Xml.XmlQualifiedName __name;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (__text.Length == 0)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}__name = global::System.Xml.XmlQualifiedName.Empty;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}int __colon = __text.IndexOf(':');");
+            _builder.AppendLine($"{indentor}string __prefix = __colon < 0 ? string.Empty : __text.Substring(0, __colon);");
+            _builder.AppendLine($"{indentor}string __namespace = reader.LookupNamespace(__prefix);");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (__namespace == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Invalid qualified name '\" + __text + \"': the prefix is not declared.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}__name = new global::System.Xml.XmlQualifiedName(__text.Substring(__colon + 1), __namespace);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            _builder.AppendLine($"{indentor}return __name;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
         /// Emits the writer for an <c>XmlQualifiedName</c> value.
         /// </summary>
         /// <remarks>
@@ -1637,24 +1801,6 @@ public sealed partial class DataContractSerializerGenerator
         {
             string target = "value." + member.MemberName;
 
-            if (member.Kind == MemberKind.ByteArray)
-            {
-                _builder.AppendLine($"{indentor}if (IsNil(reader))");
-                _builder.AppendLine($"{indentor}{{");
-                indentor.Increment();
-                _builder.AppendLine($"{indentor}reader.Skip();");
-                _builder.AppendLine($"{indentor}{target} = null;");
-                indentor.Decrement();
-                _builder.AppendLine($"{indentor}}}");
-                _builder.AppendLine($"{indentor}else");
-                _builder.AppendLine($"{indentor}{{");
-                indentor.Increment();
-                _builder.AppendLine($"{indentor}{target} = reader.ReadElementContentAsBase64();");
-                indentor.Decrement();
-                _builder.AppendLine($"{indentor}}}");
-                return;
-            }
-
             if (member.Kind == MemberKind.Contract)
             {
                 EmitNestedContractRead(indentor, member, target);
@@ -1673,12 +1819,51 @@ public sealed partial class DataContractSerializerGenerator
                 return;
             }
 
-            string readValue = member.Kind == MemberKind.Enum
-                ? ReadEnumExpression(member.NestedContractFullyQualifiedName, "__text")!
-                : ReadValueExpression(member.Kind, "__text")!;
+            EmitValueRead(indentor, member.Kind, member.NestedContractFullyQualifiedName, target, "__text");
+        }
 
-            _builder.AppendLine($"{indentor}string __text = ReadText(reader);");
-            _builder.AppendLine($"{indentor}if (__text == null)");
+        /// <summary>
+        /// Emits the read of one element whose content is a value, into an lvalue that already
+        /// exists.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Serves a member, a collection item and half a dictionary entry alike, because on the wire
+        /// they are the same thing: an element carrying one value, which may instead carry i:nil.
+        /// </para>
+        /// <para>
+        /// The nil branch assigns <c>default</c> in a statement rather than through a conditional
+        /// expression, and that is not a style choice. In <c>x = c ? default : e</c> the conditional
+        /// takes its type from <c>e</c>, so a nil <c>int?</c> would come back as 0 rather than null.
+        /// Assigning to the target directly lets the target's own type decide.
+        /// </para>
+        /// </remarks>
+        private void EmitValueRead(Indentor indentor, MemberKind kind, string? enumFullyQualifiedName, string target, string textName)
+        {
+            if (ElementValueExpression(kind) is string element)
+            {
+                _builder.AppendLine($"{indentor}if (IsNil(reader))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}reader.Skip();");
+                _builder.AppendLine($"{indentor}{target} = default;");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}{target} = {element};");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                return;
+            }
+
+            string readValue = kind == MemberKind.Enum
+                ? ReadEnumExpression(enumFullyQualifiedName, textName)!
+                : ReadValueExpression(kind, textName)!;
+
+            _builder.AppendLine($"{indentor}string {textName} = ReadText(reader);");
+            _builder.AppendLine($"{indentor}if ({textName} == null)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
             _builder.AppendLine($"{indentor}{target} = default;");
@@ -1691,6 +1876,23 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
         }
+
+        /// <summary>
+        /// For the kinds read from the element rather than from its text, the expression that reads
+        /// one - or null for the kinds that go through <see cref="ReadValueExpression"/>.
+        /// </summary>
+        /// <remarks>
+        /// Three kinds are not text at all. A byte array is base64 the reader decodes itself, a
+        /// DateTimeOffset is a two-member contract rather than a value, and a QName has to resolve a
+        /// prefix against the element still on the reader.
+        /// </remarks>
+        private static string? ElementValueExpression(MemberKind kind) => kind switch
+        {
+            MemberKind.ByteArray => "reader.ReadElementContentAsBase64()",
+            MemberKind.DateTimeOffset => "ReadDateTimeOffset(reader)",
+            MemberKind.QName => "ReadQName(reader)",
+            _ => null
+        };
 
         /// <summary>
         /// Emits the read of a member that is itself a contract, written inline by the writer.
@@ -1776,32 +1978,9 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
 
-            if (member.ElementKind == MemberKind.ByteArray)
-            {
-                _builder.AppendLine($"{indentor}if (IsNil(reader))");
-                _builder.AppendLine($"{indentor}{{");
-                indentor.Increment();
-                _builder.AppendLine($"{indentor}reader.Skip();");
-                _builder.AppendLine($"{indentor}__items.Add(default);");
-                indentor.Decrement();
-                _builder.AppendLine($"{indentor}}}");
-                _builder.AppendLine($"{indentor}else");
-                _builder.AppendLine($"{indentor}{{");
-                indentor.Increment();
-                _builder.AppendLine($"{indentor}__items.Add(reader.ReadElementContentAsBase64());");
-                indentor.Decrement();
-                _builder.AppendLine($"{indentor}}}");
-            }
-            else
-            {
-                string readItem = member.ElementKind == MemberKind.Enum
-                    ? ReadEnumExpression(member.ElementEnumFullyQualifiedName, "__itemText")!
-                    : ReadValueExpression(member.ElementKind, "__itemText")!;
-
-                _builder.AppendLine($"{indentor}string __itemText = ReadText(reader);");
-                _builder.AppendLine($"{indentor}__items.Add(__itemText == null ? default : {readItem});");
-            }
-
+            _builder.AppendLine($"{indentor}{elementType} __item = default;");
+            EmitValueRead(indentor, member.ElementKind, member.ElementEnumFullyQualifiedName, "__item", "__itemText");
+            _builder.AppendLine($"{indentor}__items.Add(__item);");
             _builder.AppendLine($"{indentor}reader.MoveToContent();");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
@@ -1927,27 +2106,7 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
 
-            if (kind == MemberKind.ByteArray)
-            {
-                _builder.AppendLine($"{indentor}if (IsNil(reader))");
-                _builder.AppendLine($"{indentor}{{");
-                indentor.Increment();
-                _builder.AppendLine($"{indentor}reader.Skip();");
-                indentor.Decrement();
-                _builder.AppendLine($"{indentor}}}");
-                _builder.AppendLine($"{indentor}else");
-                _builder.AppendLine($"{indentor}{{");
-                indentor.Increment();
-                _builder.AppendLine($"{indentor}{target} = reader.ReadElementContentAsBase64();");
-                indentor.Decrement();
-                _builder.AppendLine($"{indentor}}}");
-            }
-            else
-            {
-                _builder.AppendLine($"{indentor}string {textName} = ReadText(reader);");
-                _builder.AppendLine($"{indentor}{target} = {textName} == null ? default : {ReadValueExpression(kind, textName)};");
-            }
-
+            EmitValueRead(indentor, kind, null, target, textName);
             _builder.AppendLine($"{indentor}__part = {index};");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
@@ -2142,11 +2301,11 @@ public sealed partial class DataContractSerializerGenerator
 
         /// <summary>Whether an element whose content is a built-in value can be read back.</summary>
         /// <remarks>
-        /// A byte array has no text expression because it is not read from text at all - it comes
-        /// back through ReadElementContentAsBase64 - so it has to be admitted separately.
+        /// Two families, because a byte array, a DateTimeOffset and a QName are not read from text
+        /// at all - they consume the element themselves - and so have no text expression to offer.
         /// </remarks>
         private static bool IsBuiltInReadable(MemberKind kind) =>
-            kind == MemberKind.ByteArray || ReadValueExpression(kind, "__text") is not null;
+            ElementValueExpression(kind) is not null || ReadValueExpression(kind, "__text") is not null;
 
         /// <summary>
         /// The expression that turns an element's text back into a member's value, or null when the

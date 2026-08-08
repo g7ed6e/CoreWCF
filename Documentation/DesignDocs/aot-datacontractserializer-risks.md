@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **76 of 81** corpus cases byte-match; the five that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **37 of 81** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer: flat contracts of built-in members, nested contracts, collections, inheritance, enums and dictionaries. See "The read algorithm" below for what stays unreadable and why. |
+| **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **77 of 82** corpus cases byte-match; the five that skip are all deliberate exclusions. |
+| **M4 — `ReadObject`** | In progress. **39 of 82** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset` and `XmlQualifiedName`. See "The read algorithm" below for what stays unreadable and why. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -239,6 +239,38 @@ code. Its fixture pins an empty map, a missing one, an entry whose `Value` carri
 base64 value and a non-string key, all in one document. A branch no fixture exercises is a branch
 that is not verified, however carefully it was written.
 
+### Three kinds are not read from text at all
+
+A byte array is base64 the reader decodes itself. The other two are worth stating, because neither
+is what it looks like:
+
+- **`DateTimeOffset` is a two-member contract, not a value.** The inverse follows
+  `DateTimeOffsetAdapter.GetDateTimeOffset`: an Unspecified `DateTime` is *paired* with the offset,
+  anything else is *converted* to it. The writer recorded `UtcDateTime` and the offset separately
+  rather than a local time, so treating both cases alike would shift every value carrying an offset
+  by that offset.
+- **A `QName` has to resolve a prefix against an element that is still open.** The prefix is declared
+  on the member element and nowhere else, so reading the text and the end tag in one call -
+  `ReadElementContentAsString` - pops the scope that defines it and leaves nothing to resolve
+  against. `XmlReaderDelegator.ReadElementContentAsQName` splits the read into start, content, end
+  for exactly this reason, and the generated reader splits it the same way.
+
+The empty `QName` is a third shape again: the writer emits no content for it, so it comes back as an
+empty element rather than as an empty string that happens to parse the same way.
+
+#### The prefix a null QName does not get
+
+`SanityQualifiedNames` was added for the read side and immediately failed on the *write* side, which
+is the useful kind of failure. A non-null `XmlQualifiedName` member element carries a prefix of its
+own - `NeedsPrefix` in `ReflectionXmlFormatWriter` forces one for this type alone - but a **null**
+one does not: the prefix belongs to the path that writes a value, and a null member is written by
+`WriteNull`, which opens the element with whatever prefix is already bound.
+
+The generator had been applying the prefix unconditionally. `AllTypes` never caught it because its
+`XmlQualifiedName` is non-null, so the two halves of the rule are now pinned by two different
+fixtures. Nothing about this is visible to a semantic XML diff, which is why the harness compares
+bytes.
+
 ### What stays unreadable, and why
 
 A contract is readable only if every contract it reaches is - it is a graph question, computed with
@@ -250,7 +282,7 @@ terminates at run time on a nil or empty element rather than statically.
 | Polymorphic members, boxed members | Resolving an `i:type` back to a type is a different problem from announcing one. A member that may hold more than its declared contract would otherwise read as its declared type and silently lose the derived members. |
 | A contract that names a descendant in its `[KnownType]` closure | Same failure, at the root, where there is no member to carry the decline. Merely *having* a descendant is not enough: one this contract never names is one the reflection reader would refuse outright, so declining for it would cost coverage and buy no safety. |
 | `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
-| `DateTimeOffset`, `QName`, `DateOnly`/`TimeOnly` | One inverse each; not yet written. |
+| `DateOnly`/`TimeOnly` | One inverse each; not yet written, and the format depends on the runtime rather than the contract. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 
 ---
