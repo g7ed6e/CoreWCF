@@ -420,7 +420,7 @@ public sealed partial class DataContractSerializerGenerator
             bool canBeNull = !nullAlreadyExcluded
                 && (member.IsNullableValueType
                     || member.Kind is MemberKind.String or MemberKind.ByteArray or MemberKind.Contract
-                        or MemberKind.Collection or MemberKind.Object or MemberKind.Uri or MemberKind.QName);
+                        or MemberKind.Collection or MemberKind.Dictionary or MemberKind.Object or MemberKind.Uri or MemberKind.QName);
 
             // An XmlQualifiedName member is the one case where the element carries a prefix of its
             // own rather than reusing whatever the writer has bound. Mirrors NeedsPrefix in
@@ -491,6 +491,10 @@ public sealed partial class DataContractSerializerGenerator
                     EmitByValueContentCall(indentor, nested, value, value);
                 }
             }
+            else if (member.Kind == MemberKind.Dictionary)
+            {
+                EmitDictionaryMember(indentor, member, value);
+            }
             else if (member.Kind == MemberKind.Collection)
             {
                 // Items go in the collection namespace, not the containing contract's, and each is
@@ -517,6 +521,11 @@ public sealed partial class DataContractSerializerGenerator
                 if (member.ElementKind == MemberKind.Enum)
                 {
                     EmitWriteEnum(indentor, member.ElementEnumFullyQualifiedName!, "item");
+                }
+                else if (member.ElementKind == MemberKind.Object)
+                {
+                    // An ArrayList item announces its own runtime type, and writes its own i:nil.
+                    _builder.AppendLine($"{indentor}WriteAnyType(writer, item);");
                 }
                 else
                 {
@@ -625,6 +634,58 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Decrement();
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits a dictionary member: one entry element per pair, each with a Key and a Value.
+        /// </summary>
+        /// <remarks>
+        /// The entry element is named after both type arguments - KeyValueOfstringstring,
+        /// KeyValueOfbase64Binarybase64Binary - and every element involved sits in the Arrays
+        /// namespace, declared once on the member. Key and Value are ordinary primitive writes, so a
+        /// nullable one gets i:nil exactly as a member of that type would.
+        /// </remarks>
+        private void EmitDictionaryMember(Indentor indentor, MemberSpec member, string value)
+        {
+            _builder.AppendLine($"{indentor}foreach (var pair in {value})");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteStartElement({Literal(member.ItemName!)}, {Literal(member.ItemNamespace!)});");
+
+            EmitDictionaryPart(indentor, "Key", member.ItemNamespace!, member.KeyKind, member.KeyCanBeNull, "pair.Key");
+            EmitDictionaryPart(indentor, "Value", member.ItemNamespace!, member.ValueKind, member.ValueCanBeNull, "pair.Value");
+
+            _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        private void EmitDictionaryPart(Indentor indentor, string name, string ns, MemberKind kind, bool canBeNull, string access)
+        {
+            _builder.AppendLine($"{indentor}writer.WriteStartElement({Literal(name)}, {Literal(ns)});");
+
+            if (canBeNull)
+            {
+                _builder.AppendLine($"{indentor}if ({access} == null)");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}WriteNil(writer);");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                _builder.AppendLine($"{indentor}else");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+            }
+
+            _builder.AppendLine($"{indentor}{WriteValueStatement(kind, access)}");
+
+            if (canBeNull)
+            {
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine($"{indentor}writer.WriteEndElement();");
         }
 
         /// <summary>
@@ -897,7 +958,7 @@ public sealed partial class DataContractSerializerGenerator
 
             return member.Kind switch
             {
-                MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection
+                MemberKind.String or MemberKind.ByteArray or MemberKind.Contract or MemberKind.Collection or MemberKind.Dictionary
                     or MemberKind.Object or MemberKind.Uri or MemberKind.QName => $"{access} == null",
                 MemberKind.Boolean => $"!{access}",
                 _ => $"{access} == default"

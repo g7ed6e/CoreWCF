@@ -238,11 +238,11 @@ namespace App
         {
             // Falling back is a correct outcome, so this is a recorded comment rather than a
             // diagnostic - and no serializer is emitted, so GetSerializer returns null for it.
-            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+            GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
     [DataContract]
     public class HasCollection
     {
-        [DataMember] public System.Collections.Generic.Dictionary<string, string> Values { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<string, Order> Values { get; set; }
     }
 
     [DataContractSerializable(typeof(HasCollection))]
@@ -253,7 +253,7 @@ namespace App
 
             AssertCompiles(result);
             Assert.Empty(result.GeneratorDiagnostics);
-            Assert.Contains("unsupported type", result.SingleSource);
+            Assert.Contains("unsupported key or value type", result.SingleSource);
             Assert.DoesNotContain("if (type == typeof(global::App.HasCollection))", result.SingleSource);
         }
 
@@ -380,7 +380,7 @@ namespace App
         {
             // A container is only writable if everything it writes is. Emitting a serializer that
             // silently skipped an unwritable member would produce wrong XML rather than falling back.
-            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+            GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
     [DataContract]
     public class Container
     {
@@ -390,7 +390,7 @@ namespace App
     [DataContract]
     public class Problem
     {
-        [DataMember] public System.Collections.Generic.Dictionary<string, string> Values { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<string, Order> Values { get; set; }
     }
 
     [DataContractSerializable(typeof(Container))]
@@ -789,17 +789,96 @@ namespace App
         }
 
         [Fact]
+        public void DictionaryMember_NamesEntriesAfterBothTypeArguments()
+        {
+            // An entry is named KeyValueOf followed by the XSD name of each argument, which is why
+            // Dictionary<string, string> writes KeyValueOfstringstring and Dictionary<byte[], byte[]>
+            // writes KeyValueOfbase64Binarybase64Binary. Both are pinned by fixtures.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Maps
+    {
+        [DataMember] public System.Collections.Generic.Dictionary<string, string> Names { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<byte[], byte[]> Blobs { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Maps))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteStartElement(\"KeyValueOfstringstring\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("writer.WriteStartElement(\"KeyValueOfbase64Binarybase64Binary\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+
+            // Key and Value are ordinary primitive writes in the same namespace.
+            Assert.Contains("writer.WriteStartElement(\"Key\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("writer.WriteStartElement(\"Value\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+        }
+
+        [Fact]
+        public void ArrayListMember_WritesAnyTypeItems()
+        {
+            // ArrayList holds anything, so each item announces its own runtime type - the same shape
+            // as an object member, once per item. Unlike a System.Array member, the namespace is
+            // declared once on the member element, so the items carry a prefix rather than each
+            // binding a default xmlns of its own.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Bag
+    {
+        [DataMember] public System.Collections.ArrayList Items { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Bag))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteXmlnsAttribute(null, \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("writer.WriteStartElement(\"anyType\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("WriteAnyType(writer, item);", result.SingleSource);
+        }
+
+        [Fact]
+        public void DictionaryWithAContractValue_LeavesTheContractToReflection()
+        {
+            // Only built-in arguments are supported. A contract argument would contribute its own
+            // contract name to the entry name and, if it were generic, a hash - neither of which is
+            // worth guessing at.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
+    [DataContract]
+    public class Maps
+    {
+        [DataMember] public System.Collections.Generic.Dictionary<string, Order> Orders { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Maps))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("has unsupported key or value type", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.Maps))", result.SingleSource);
+        }
+
+        [Fact]
         public void AContractBlockedOnSeveralThings_ReportsEveryReason()
         {
             // The coverage report used to record the first reason and stop, which made a wide
             // contract read like a single blocker when it was one of many - and did exactly that
             // once, for AllTypes.
-            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+            GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"
     [DataContract]
     public class Awkward
     {
-        [DataMember] public System.Collections.ArrayList Untyped { get; set; }
-        [DataMember] public System.Collections.Generic.Dictionary<string, string> Map { get; set; }
+        [DataMember] public int[][] Jagged { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<string, Order> Map { get; set; }
         [DataMember] private int _hidden;
     }
 
@@ -810,8 +889,8 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Contains("member 'Untyped' has unsupported type", result.SingleSource);
-            Assert.Contains("member 'Map' has unsupported type", result.SingleSource);
+            Assert.Contains("member 'Jagged' has unsupported collection element type", result.SingleSource);
+            Assert.Contains("member 'Map' has unsupported key or value type", result.SingleSource);
             Assert.Contains("member '_hidden' is not public", result.SingleSource);
         }
 

@@ -551,6 +551,10 @@ public sealed partial class DataContractSerializerGenerator
                 string? itemNamespace = null;
                 bool elementCanBeNull = false;
                 INamedTypeSymbol? elementEnum = null;
+                MemberKind keyKind = MemberKind.Unsupported;
+                MemberKind valueKind = MemberKind.Unsupported;
+                bool keyCanBeNull = false;
+                bool valueCanBeNull = false;
 
                 if (kind == MemberKind.Collection)
                 {
@@ -567,10 +571,25 @@ public sealed partial class DataContractSerializerGenerator
                         enums.Add(elementEnum);
                     }
                 }
+                else if (kind == MemberKind.Dictionary)
+                {
+                    IsDictionary(UnwrapNullable(memberType), out ITypeSymbol? keyType, out ITypeSymbol? valueType);
+
+                    if (TryClassifyDictionary(keyType!, valueType!, out itemName, out keyKind, out valueKind, out keyCanBeNull, out valueCanBeNull))
+                    {
+                        itemNamespace = CollectionNamespace;
+                    }
+                    else
+                    {
+                        unsupportedReasons.Add("member '" + member.Name + "' has unsupported key or value type in '" +
+                                               memberType.ToDisplayString() + "'");
+                    }
+                }
 
                 string? childNamespace = kind switch
                 {
-                    MemberKind.Collection => itemNamespace != contractNamespace ? itemNamespace : null,
+                    MemberKind.Collection or MemberKind.Dictionary =>
+                        itemNamespace != contractNamespace ? itemNamespace : null,
 
                     // Its two members live in the System namespace, so the member element declares
                     // it exactly as it would for any other contract in a different namespace.
@@ -598,6 +617,10 @@ public sealed partial class DataContractSerializerGenerator
                     ItemName = itemName,
                     ItemNamespace = itemNamespace,
                     ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
+                    KeyKind = keyKind,
+                    ValueKind = valueKind,
+                    KeyCanBeNull = keyCanBeNull,
+                    ValueCanBeNull = valueCanBeNull,
                     ElementCanBeNull = elementCanBeNull,
                     Candidates = new EquatableArray<string>(candidates.ToArray()),
                     EnumCandidates = new EquatableArray<string>(enumCandidates.ToArray()),
@@ -670,6 +693,16 @@ public sealed partial class DataContractSerializerGenerator
             elementEnum = null;
             canBeNull = false;
 
+            if (IsArrayList(collectionType))
+            {
+                itemName = "anyType";
+                itemNamespace = CollectionNamespace;
+
+                // WriteAnyType writes i:nil itself, so the caller must not also test for null.
+                canBeNull = false;
+                return MemberKind.Object;
+            }
+
             ITypeSymbol? element = CollectionElementTypeOf(collectionType);
             if (element is null)
             {
@@ -708,29 +741,7 @@ public sealed partial class DataContractSerializerGenerator
                 return MemberKind.Unsupported;
             }
 
-            itemName = kind switch
-            {
-                MemberKind.Boolean => "boolean",
-                MemberKind.Byte => "unsignedByte",
-                MemberKind.SByte => "byte",
-                MemberKind.Int16 => "short",
-                MemberKind.UInt16 => "unsignedShort",
-                MemberKind.Int32 => "int",
-                MemberKind.UInt32 => "unsignedInt",
-                MemberKind.Int64 => "long",
-                MemberKind.UInt64 => "unsignedLong",
-                MemberKind.Single => "float",
-                MemberKind.Double => "double",
-                MemberKind.Decimal => "decimal",
-                MemberKind.Char => "char",
-                MemberKind.String => "string",
-                MemberKind.Guid => "guid",
-                MemberKind.DateTime => "dateTime",
-                MemberKind.TimeSpan => "duration",
-                MemberKind.ByteArray => "base64Binary",
-                MemberKind.Uri => "anyURI",
-                _ => null
-            };
+            itemName = XsdNameOf(kind);
 
             if (itemName is null)
             {
@@ -961,6 +972,105 @@ public sealed partial class DataContractSerializerGenerator
             return false;
         }
 
+        /// <summary>Whether this is the non-generic <c>ArrayList</c>.</summary>
+        private static bool IsArrayList(ITypeSymbol type) =>
+            type.ToDisplayString() == "System.Collections.ArrayList";
+
+        /// <summary>Whether this is a <c>Dictionary&lt;K,V&gt;</c>, and what its arguments are.</summary>
+        private static bool IsDictionary(ITypeSymbol type, out ITypeSymbol? key, out ITypeSymbol? value)
+        {
+            key = null;
+            value = null;
+
+            if (type is not INamedTypeSymbol { TypeArguments.Length: 2 } named
+                || named.OriginalDefinition.ToDisplayString() != "System.Collections.Generic.Dictionary<TKey, TValue>")
+            {
+                return false;
+            }
+
+            key = named.TypeArguments[0];
+            value = named.TypeArguments[1];
+            return true;
+        }
+
+        /// <summary>
+        /// Classifies a dictionary's key and value, and builds the name its entries are written
+        /// under.
+        /// </summary>
+        /// <remarks>
+        /// An entry is named <c>KeyValueOf</c> followed by the XSD name of each type argument, which
+        /// is why <c>Dictionary&lt;string, string&gt;</c> writes KeyValueOfstringstring and
+        /// <c>Dictionary&lt;byte[], byte[]&gt;</c> writes KeyValueOfbase64Binarybase64Binary. Both
+        /// are pinned by fixtures. Only built-in arguments are supported: a contract or enum
+        /// argument would contribute its own contract name and, where the argument is itself
+        /// generic, a hash - neither of which is worth guessing at.
+        /// </remarks>
+        private static bool TryClassifyDictionary(
+            ITypeSymbol keyType,
+            ITypeSymbol valueType,
+            out string? entryName,
+            out MemberKind keyKind,
+            out MemberKind valueKind,
+            out bool keyCanBeNull,
+            out bool valueCanBeNull)
+        {
+            entryName = null;
+
+            keyKind = ClassifyMember(keyType, out bool keyNullable, out INamedTypeSymbol? _);
+            valueKind = ClassifyMember(valueType, out bool valueNullable, out INamedTypeSymbol? _);
+
+            keyCanBeNull = keyKind is MemberKind.String or MemberKind.ByteArray or MemberKind.Uri;
+            valueCanBeNull = valueKind is MemberKind.String or MemberKind.ByteArray or MemberKind.Uri;
+
+            if (keyNullable || valueNullable)
+            {
+                return false;
+            }
+
+            string? keyName = XsdNameOf(keyKind);
+            string? valueName = XsdNameOf(valueKind);
+            if (keyName is null || valueName is null)
+            {
+                return false;
+            }
+
+            entryName = "KeyValueOf" + keyName + valueName;
+            return true;
+        }
+
+        /// <summary>
+        /// The XSD name a built-in type is written under, or null if it has none.
+        /// </summary>
+        /// <remarks>
+        /// One table serving three jobs: the element name of a collection item, the local name of an
+        /// <c>i:type</c>, and half of a dictionary entry's name. Several entries are not what the CLR
+        /// type suggests - sbyte is "byte", byte is "unsignedByte", TimeSpan is "duration" - and all
+        /// of them are pinned by the SanityPrimitiveArrays and SanityBoxedPrimitives fixtures.
+        /// </remarks>
+        private static string? XsdNameOf(MemberKind kind) => kind switch
+        {
+            MemberKind.Boolean => "boolean",
+            MemberKind.Byte => "unsignedByte",
+            MemberKind.SByte => "byte",
+            MemberKind.Int16 => "short",
+            MemberKind.UInt16 => "unsignedShort",
+            MemberKind.Int32 => "int",
+            MemberKind.UInt32 => "unsignedInt",
+            MemberKind.Int64 => "long",
+            MemberKind.UInt64 => "unsignedLong",
+            MemberKind.Single => "float",
+            MemberKind.Double => "double",
+            MemberKind.Decimal => "decimal",
+            MemberKind.Char => "char",
+            MemberKind.String => "string",
+            MemberKind.Guid => "guid",
+            MemberKind.DateTime => "dateTime",
+            MemberKind.TimeSpan => "duration",
+            MemberKind.ByteArray => "base64Binary",
+            MemberKind.Uri => "anyURI",
+            _ => null
+        };
+
         /// <summary>The wire name of a contract or enum: its <c>Name</c>, or the type's own name.</summary>
         private static string ContractNameOf(INamedTypeSymbol type) =>
             (GetAttribute(type, DataContractAttributeName) is AttributeData contract
@@ -1164,7 +1274,14 @@ public sealed partial class DataContractSerializerGenerator
             // A one-dimensional array of anything but byte, or a List<T>, is written as a
             // collection. byte[] is deliberately excluded above: the serializer treats it as a
             // primitive written as base64, not as an array of bytes.
-            if (!isNullableValueType && CollectionElementTypeOf(type) is not null)
+            if (!isNullableValueType && IsDictionary(type, out ITypeSymbol? _, out ITypeSymbol? _))
+            {
+                return MemberKind.Dictionary;
+            }
+
+            // ArrayList holds anything, so it is written as a sequence of anyType items that each
+            // announce their own runtime type - the same shape as an object member, one per item.
+            if (!isNullableValueType && (IsArrayList(type) || CollectionElementTypeOf(type) is not null))
             {
                 return MemberKind.Collection;
             }

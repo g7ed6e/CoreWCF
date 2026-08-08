@@ -103,6 +103,18 @@ public sealed partial class DataContractSerializerGenerator
         /// </summary>
         public string? ElementEnumFullyQualifiedName { get; init; }
 
+        /// <summary>For <see cref="MemberKind.Dictionary"/>, how the key is written.</summary>
+        public MemberKind KeyKind { get; init; }
+
+        /// <summary>For <see cref="MemberKind.Dictionary"/>, how the value is written.</summary>
+        public MemberKind ValueKind { get; init; }
+
+        /// <summary>For <see cref="MemberKind.Dictionary"/>, whether the key may be null.</summary>
+        public bool KeyCanBeNull { get; init; }
+
+        /// <summary>For <see cref="MemberKind.Dictionary"/>, whether the value may be null.</summary>
+        public bool ValueCanBeNull { get; init; }
+
         /// <summary>For <see cref="MemberKind.Collection"/>, whether an item may be null.</summary>
         public bool ElementCanBeNull { get; init; }
 
@@ -221,6 +233,11 @@ public sealed partial class DataContractSerializerGenerator
         Contract,
         Enum,
         Collection,
+
+        /// <summary>
+        /// A <c>Dictionary&lt;K,V&gt;</c>, written as entries named after both type arguments.
+        /// </summary>
+        Dictionary,
 
         /// <summary>
         /// A member declared as <c>object</c>, whose runtime type is announced with <c>i:type</c>.
