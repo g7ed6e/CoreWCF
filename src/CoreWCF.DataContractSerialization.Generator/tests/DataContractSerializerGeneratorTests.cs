@@ -707,6 +707,88 @@ namespace App
         }
 
         [Fact]
+        public void SerializableType_IsWrittenFromItsFields()
+        {
+            // A [Serializable] type has no [DataMember]s to read. Every instance field takes part,
+            // properties never do, and [NonSerialized] opts a field out. See the else branch of
+            // hasDataContract in ClassDataContract.ImportDataMembers.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [System.Serializable]
+    public class Legacy
+    {
+        public string Kept;
+        [System.NonSerialized] public string Dropped;
+        public string AlsoKept { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Legacy))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteStartElement(\"Kept\"", result.SingleSource);
+            Assert.DoesNotContain("writer.WriteStartElement(\"Dropped\"", result.SingleSource);
+
+            // A property is not a field, so it contributes nothing - and neither does its compiler
+            // generated backing field, whose name is not a legal element name anyway.
+            Assert.DoesNotContain("AlsoKept", result.SingleSource);
+        }
+
+        [Fact]
+        public void TypeWithBothAttributes_IsWrittenAsADataContract()
+        {
+            // [DataContract] wins when a type carries both, so only the annotated members take part.
+            // BaseSerializable in the corpus is exactly this shape.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [System.Serializable]
+    [DataContract]
+    public class Both
+    {
+        [DataMember] public string Annotated;
+        public string Bare;
+    }
+
+    [DataContractSerializable(typeof(Both))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteStartElement(\"Annotated\"", result.SingleSource);
+            Assert.DoesNotContain("writer.WriteStartElement(\"Bare\"", result.SingleSource);
+        }
+
+        [Fact]
+        public void SerializableTypeImplementingISerializable_LeavesTheContractToReflection()
+        {
+            // ISerializable takes over serialization entirely - a different write algorithm, not a
+            // different member list - so the fields are not what would go on the wire.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [System.Serializable]
+    public class Custom : System.Runtime.Serialization.ISerializable
+    {
+        public string Value;
+
+        public void GetObjectData(System.Runtime.Serialization.SerializationInfo info, System.Runtime.Serialization.StreamingContext context)
+        {
+        }
+    }
+
+    [DataContractSerializable(typeof(Custom))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("COREWCF_0402", result.DiagnosticIds);
+            Assert.DoesNotContain("if (type == typeof(global::App.Custom))", result.SingleSource);
+        }
+
+        [Fact]
         public void UnsignedLongMember_GoesThroughWriteRaw()
         {
             // XmlWriter has no WriteValue(ulong): ulong converts implicitly to float, double and

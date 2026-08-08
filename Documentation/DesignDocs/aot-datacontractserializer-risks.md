@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | In progress. Nested contract members and inheritance, then enums, then arrays and `List<T>` of primitives, then `IsReference`, then `[KnownType]`/`i:type` and `object` members. **61 of 77** corpus cases byte-match; the rest report unsupported and skip. |
-| **M4+ — deferred** | `[Serializable]`, `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, implicit (no-attribute) contracts, `[KnownType]` naming a method, `ReadObject`, and the seam gaps below. |
+| **M3 — capability by capability** | In progress. Nested contract members and inheritance, then enums, then arrays and `List<T>` of primitives, then `IsReference`, then `[KnownType]`/`i:type` and `object` members, then `[Serializable]`. **65 of 77** corpus cases byte-match; the rest report unsupported and skip. |
+| **M4+ — deferred** | `Dictionary`/`ArrayList`/jagged arrays, `DateOnly`, enums in an `object` member, implicit (no-attribute) contracts, `[KnownType]` naming a method, `ISerializable`, `ReadObject`, and the seam gaps below. |
 
 ## What the switch does
 
@@ -94,6 +94,32 @@ The serializer explicitly declares a namespace in exactly two places:
 
 `z:Id` / `z:Ref` are written as attributes with an explicit `Globals.SerPrefix`
 (`XmlObjectSerializerWriteContext.cs:218,224`), which is why `z:` is stable rather than allocated.
+
+### `[Serializable]`, and why it is not the same as an implicit contract
+
+From the `else` branch of `hasDataContract` in `ClassDataContract.ImportDataMembers`:
+
+- `[DataContract]` **wins** when a type carries both. `BaseSerializable` in the corpus is exactly
+  that shape and is written from its `[DataMember]`s, not its fields.
+- Otherwise every instance **field** takes part — public and non-public — excluding `[NonSerialized]`.
+  Properties never do, at all.
+- Each field keeps its own name, and the fields sort by the same `DataMemberComparer`. Serializable
+  fields get `Order = 0` rather than the `-1` an unspecified `[DataMember]` gets; within a single
+  contract they are all equal either way, so the sort reduces to ordinal by name.
+
+This is not the implicit no-attribute contract that v1 excludes. `[Serializable]` is an explicit
+opt-in with a defined member set; a bare POCO is inferred, and stays out of scope.
+
+Two restrictions the generator adds, both to avoid claiming more than it can deliver:
+
+- **Only types declared in source.** `[Serializable]` is everywhere in the framework — `Uri`,
+  `ArrayList` and `Dictionary<,>` all carry it — and their wire format has nothing to do with their
+  field layout. A type from metadata keeps whatever answer it had before.
+- **Not `ISerializable`.** That takes over serialization entirely; it is a different write algorithm,
+  not a different member list, and the fields are not what would go on the wire.
+
+Non-public fields still decline, for the reason they always did: generated code lives in the
+context's class and cannot reach another type's privates, however close by they are compiled.
 
 ### Object identity, as `IsReference` defines it
 

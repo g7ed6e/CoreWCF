@@ -27,6 +27,8 @@ public sealed partial class DataContractSerializerGenerator
         internal const string DataContractAttributeName = "System.Runtime.Serialization.DataContractAttribute";
         internal const string DataMemberAttributeName = "System.Runtime.Serialization.DataMemberAttribute";
         internal const string KnownTypeAttributeName = "System.Runtime.Serialization.KnownTypeAttribute";
+        internal const string ClrSerializableAttributeName = "System.SerializableAttribute";
+        internal const string NonSerializedAttributeName = "System.NonSerializedAttribute";
 
         /// <summary>The namespace a contract gets when it does not name one itself.</summary>
         private const string DefaultNamespacePrefix = "http://schemas.datacontract.org/2004/07/";
@@ -79,7 +81,7 @@ public sealed partial class DataContractSerializerGenerator
                     continue;
                 }
 
-                if (GetAttribute(contractType, DataContractAttributeName) is null)
+                if (!IsContractType(contractType))
                 {
                     diagnostics.Add(DiagnosticInfo.Create(
                         DiagnosticDescriptors.TypeIsNotADataContract, contractType, contractType.ToDisplayString()));
@@ -307,10 +309,12 @@ public sealed partial class DataContractSerializerGenerator
         {
             referenced = new List<INamedTypeSymbol>();
             enums = new List<INamedTypeSymbol>();
-            AttributeData dataContract = GetAttribute(contractType, DataContractAttributeName)!;
+            // Null for a [Serializable] type, which names itself and is written from its fields.
+            AttributeData? dataContract = GetAttribute(contractType, DataContractAttributeName);
+            bool isSerializable = dataContract is null;
 
-            string contractName = GetNamedArgument(dataContract, "Name") ?? contractType.Name;
-            string contractNamespace = GetNamedArgument(dataContract, "Namespace") ?? DefaultNamespaceFor(contractType);
+            string contractName = (dataContract is null ? null : GetNamedArgument(dataContract, "Name")) ?? contractType.Name;
+            string contractNamespace = (dataContract is null ? null : GetNamedArgument(dataContract, "Namespace")) ?? DefaultNamespaceFor(contractType);
 
             string? unsupportedReason = null;
 
@@ -346,7 +350,7 @@ public sealed partial class DataContractSerializerGenerator
             }
 
             INamedTypeSymbol? baseContract = contractType.BaseType is INamedTypeSymbol candidate
-                && GetAttribute(candidate, DataContractAttributeName) is not null
+                && IsContractType(candidate)
                     ? candidate
                     : null;
 
@@ -363,6 +367,7 @@ public sealed partial class DataContractSerializerGenerator
             // See ClassDataContractCriticalHelper.EnsureIsReferenceImported in dotnet/runtime.
             if (unsupportedReason is null
                 && baseContract is not null
+                && dataContract is not null
                 && GetNamedArgumentBoolean(dataContract, "IsReference") is bool declaredIsReference
                 && declaredIsReference != InheritsIsReference(baseContract))
             {
@@ -386,9 +391,32 @@ public sealed partial class DataContractSerializerGenerator
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (member.IsStatic || GetAttribute(member, DataMemberAttributeName) is not AttributeData dataMember)
+                if (member.IsStatic)
                 {
                     continue;
+                }
+
+                // A [Serializable] type has no [DataMember]s to read. Every instance field takes
+                // part unless it is [NonSerialized], properties never do, and each field keeps its
+                // own name. See the else branch of hasDataContract in
+                // ClassDataContract.ImportDataMembers.
+                AttributeData? dataMember = null;
+                if (isSerializable)
+                {
+                    if (member is not IFieldSymbol
+                        || GetAttribute(member, NonSerializedAttributeName) is not null
+                        || member.Name.IndexOf('<') >= 0)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    dataMember = GetAttribute(member, DataMemberAttributeName);
+                    if (dataMember is null)
+                    {
+                        continue;
+                    }
                 }
 
                 // A property that overrides a base [DataMember] does not add a second element: the
@@ -473,7 +501,7 @@ public sealed partial class DataContractSerializerGenerator
                     // the switch with no branch for it, so the contract is declined instead.
                     foreach (INamedTypeSymbol knownType in knownTypes)
                     {
-                        if (GetAttribute(knownType, DataContractAttributeName) is null || knownType.TypeKind == TypeKind.Enum)
+                        if (!IsContractType(knownType) || knownType.TypeKind == TypeKind.Enum)
                         {
                             unsupportedReason ??= "member '" + member.Name + "' is declared as object and known type " +
                                                   knownType.Name + " is not a data contract this generator can write";
@@ -503,11 +531,14 @@ public sealed partial class DataContractSerializerGenerator
                     ? (CollectionNamespace != contractNamespace ? CollectionNamespace : null)
                     : ChildNamespaceToDeclare(memberType, contractNamespace);
 
+                // A serializable field carries no attribute to read, and upstream gives it Order 0
+                // rather than the -1 an unspecified [DataMember] gets. Within one contract every
+                // field has the same Order, so the sort below reduces to ordinal by name either way.
                 members.Add(new MemberSpec(
-                    Name: GetNamedArgument(dataMember, "Name") ?? member.Name,
-                    Order: GetNamedArgumentInt32(dataMember, "Order") ?? -1,
-                    EmitDefaultValue: GetNamedArgumentBoolean(dataMember, "EmitDefaultValue") ?? true,
-                    IsRequired: GetNamedArgumentBoolean(dataMember, "IsRequired") ?? false,
+                    Name: (dataMember is null ? null : GetNamedArgument(dataMember, "Name")) ?? member.Name,
+                    Order: dataMember is null ? 0 : GetNamedArgumentInt32(dataMember, "Order") ?? -1,
+                    EmitDefaultValue: dataMember is null || GetNamedArgumentBoolean(dataMember, "EmitDefaultValue") is not false,
+                    IsRequired: dataMember is not null && GetNamedArgumentBoolean(dataMember, "IsRequired") == true,
                     MemberName: member.Name,
                     Kind: kind,
                     IsNullableValueType: isNullableValueType,
@@ -807,7 +838,7 @@ public sealed partial class DataContractSerializerGenerator
             {
                 if (!SymbolEqualityComparer.Default.Equals(knownType, declaredType)
                     && DerivesFrom(knownType, declaredType)
-                    && GetAttribute(knownType, DataContractAttributeName) is not null
+                    && IsContractType(knownType)
                     && added.Add(knownType.ToDisplayString(FullyQualifiedFormat)))
                 {
                     candidates.Add(knownType);
@@ -832,6 +863,55 @@ public sealed partial class DataContractSerializerGenerator
             for (INamedTypeSymbol? current = type.BaseType; current is not null; current = current.BaseType)
             {
                 if (SymbolEqualityComparer.Default.Equals(current, candidateBase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Whether this type is a contract the generator recognises - either an explicit
+        /// <c>[DataContract]</c> or a <c>[Serializable]</c> type.
+        /// </summary>
+        private static bool IsContractType(INamedTypeSymbol type) =>
+            GetAttribute(type, DataContractAttributeName) is not null || IsSerializableContract(type);
+
+        /// <summary>
+        /// Whether this type is written from its fields because it carries <c>[Serializable]</c> and
+        /// no <c>[DataContract]</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>[DataContract]</c> wins when a type carries both, which is why it is checked first -
+        /// BaseSerializable in the corpus carries both and is written from its <c>[DataMember]</c>s.
+        /// See ClassDataContract.ImportDataMembers in dotnet/runtime, where the serializable branch
+        /// is the else of hasDataContract.
+        /// </para>
+        /// <para>
+        /// Restricted to types declared in source. <c>[Serializable]</c> is common in the framework -
+        /// Uri, ArrayList and Dictionary all carry it - and treating those as contracts would mean
+        /// claiming to write types whose fields are an implementation detail and whose wire format
+        /// is nothing like their field layout. A type from metadata keeps the answer it had before.
+        /// </para>
+        /// </remarks>
+        private static bool IsSerializableContract(INamedTypeSymbol type) =>
+            GetAttribute(type, DataContractAttributeName) is null
+            && GetAttribute(type, ClrSerializableAttributeName) is not null
+            && type.TypeKind is TypeKind.Class or TypeKind.Struct
+            && type.DeclaringSyntaxReferences.Length > 0
+            && !ImplementsISerializable(type);
+
+        /// <summary>
+        /// Whether the type takes over its own serialization, which is a different write algorithm
+        /// entirely and one the generator does not implement.
+        /// </summary>
+        private static bool ImplementsISerializable(INamedTypeSymbol type)
+        {
+            foreach (INamedTypeSymbol iface in type.AllInterfaces)
+            {
+                if (iface.ToDisplayString() == "System.Runtime.Serialization.ISerializable")
                 {
                     return true;
                 }
@@ -868,14 +948,14 @@ public sealed partial class DataContractSerializerGenerator
         {
             ITypeSymbol type = UnwrapNullable(memberType);
 
-            if (type.TypeKind == TypeKind.Enum || GetAttribute(type, DataContractAttributeName) is null)
+            if (type.TypeKind == TypeKind.Enum || type is not INamedTypeSymbol named || !IsContractType(named))
             {
                 return null;
             }
 
-            string ns = GetAttribute(type, DataContractAttributeName) is AttributeData contract
-                ? GetNamedArgument(contract, "Namespace") ?? DefaultNamespaceFor((INamedTypeSymbol)type)
-                : string.Empty;
+            string ns = GetAttribute(named, DataContractAttributeName) is AttributeData contract
+                ? GetNamedArgument(contract, "Namespace") ?? DefaultNamespaceFor(named)
+                : DefaultNamespaceFor(named);
 
             return ns.Length > 0 && ns != containingNamespace ? ns : null;
         }
@@ -979,7 +1059,7 @@ public sealed partial class DataContractSerializerGenerator
             // nullable unwrapping and the nil handling to compose, which is untested.
             if (type is INamedTypeSymbol named
                 && named.TypeKind == TypeKind.Class
-                && GetAttribute(named, DataContractAttributeName) is not null)
+                && IsContractType(named))
             {
                 if (DeclaresRuntimeKnownTypes(named))
                 {
