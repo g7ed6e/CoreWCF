@@ -1,0 +1,53 @@
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using CoreWCF.DataContractSerialization.TestCorpus.Sanity;
+
+namespace CoreWCF.DataContractSerialization.TestCorpus
+{
+    public static partial class CorpusCatalog
+    {
+        static partial void RegisterSanity(CorpusBuilder builder)
+        {
+            builder.Add<SanityPrimitives>("populated", SanityPrimitives.Populated)
+                   .WithTags("primitives", "fields", "floating-point");
+
+            builder.Add<SanityPrimitives>("default", () => new SanityPrimitives())
+                   .WithTags("primitives", "defaults");
+
+            builder.Add<SanityMemberAttributes>("populated", SanityMemberAttributes.Populated)
+                   .WithTags("member-order", "emit-default", "renaming");
+
+            builder.Add<SanityCustomNaming>("populated", SanityCustomNaming.Populated)
+                   .WithTags("contract-naming", "namespaces");
+
+            builder.Add<SanityDerived>("populated", SanityDerived.Populated)
+                   .WithTags("inheritance");
+
+            // Declared as the base type but holding a derived instance: this is the i:type case,
+            // the only form of polymorphism in scope for v1.
+            builder.Add<SanityKnownTypeHolder>("derived-instance", SanityKnownTypeHolder.Populated)
+                   .WithKnownTypes(typeof(SanityDerived))
+                   .WithTags("knowntype", "polymorphism");
+
+            builder.Add<SanityCollections>("populated", SanityCollections.Populated)
+                   .WithTags("collections");
+
+            builder.Add<SanityEnums>("populated", SanityEnums.Populated)
+                   .WithTags("enums");
+
+            builder.Add<SanityNullable>("populated", SanityNullable.Populated)
+                   .WithTags("nil", "nullable");
+
+            builder.Add<SanityReferenceNode>("cycle", SanityReferenceNode.Populated)
+                   .WithTags("isreference", "cycle");
+
+            // Registered indirectly: SanityBase is only ever serialized through SanityKnownTypeHolder,
+            // and SanityNestedNamespace through SanityCustomNaming / SanityNullable. Both are covered
+            // as member types rather than as roots.
+            builder.Skip<SanityBase>("Covered as the declared member type of SanityKnownTypeHolder.");
+            builder.Skip<SanityNestedNamespace>("Covered as a member type of SanityCustomNaming and SanityNullable.");
+            builder.Skip<SanityRenamedEnum>("Enum contract covered as a member of SanityEnums.");
+        }
+    }
+}
