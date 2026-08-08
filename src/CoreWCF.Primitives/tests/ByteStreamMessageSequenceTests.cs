@@ -44,10 +44,11 @@ namespace CoreWCF.Primitives.Tests
         public async Task MultiSegmentSequence_GetBodyReturnsEveryByte()
         {
             byte[] expected = Payload(300);
-            ReadOnlySequence<byte> sequence = CreateMultiSegment(expected, segmentSize: 64);
+            BufferManager bufferManager = BufferManager;
+            ReadOnlySequence<byte> sequence = CreateMultiSegment(bufferManager, expected, segmentSize: 64);
             Assert.False(sequence.IsSingleSegment);
 
-            Message message = await Encoder.ReadMessageAsync(sequence, BufferManager, ContentType);
+            Message message = await Encoder.ReadMessageAsync(sequence, bufferManager, ContentType);
 
             Assert.Equal(expected, message.GetBody<byte[]>());
         }
@@ -56,10 +57,11 @@ namespace CoreWCF.Primitives.Tests
         public async Task MultiSegmentSequence_ReadInChunks_ReturnsEachByteOnce()
         {
             byte[] expected = Payload(300);
-            ReadOnlySequence<byte> sequence = CreateMultiSegment(expected, segmentSize: 64);
+            BufferManager bufferManager = BufferManager;
+            ReadOnlySequence<byte> sequence = CreateMultiSegment(bufferManager, expected, segmentSize: 64);
             Assert.False(sequence.IsSingleSegment);
 
-            Message message = await Encoder.ReadMessageAsync(sequence, BufferManager, ContentType);
+            Message message = await Encoder.ReadMessageAsync(sequence, bufferManager, ContentType);
 
             Assert.Equal(expected, ReadBodyInChunks(message, chunkSize: 37));
         }
@@ -117,9 +119,10 @@ namespace CoreWCF.Primitives.Tests
         public async Task WriteBodyContents_ToAWriterOtherThanXmlByteStreamWriter_WritesTheBody()
         {
             byte[] expected = Encoding.ASCII.GetBytes("This is a text message");
-            ReadOnlySequence<byte> sequence = CreateMultiSegment(expected, segmentSize: 8);
+            BufferManager bufferManager = BufferManager;
+            ReadOnlySequence<byte> sequence = CreateMultiSegment(bufferManager, expected, segmentSize: 8);
 
-            Message message = await Encoder.ReadMessageAsync(sequence, BufferManager, ContentType);
+            Message message = await Encoder.ReadMessageAsync(sequence, bufferManager, ContentType);
 
             using var stream = new MemoryStream();
             using (XmlDictionaryWriter writer = XmlDictionaryWriter.CreateTextWriter(stream, Encoding.UTF8, ownsStream: false))
@@ -154,13 +157,21 @@ namespace CoreWCF.Primitives.Tests
             return actual.ToArray();
         }
 
-        private static ReadOnlySequence<byte> CreateMultiSegment(byte[] data, int segmentSize)
+        // Every segment is rented too: handing the encoder a BufferManager transfers ownership of
+        // each buffer the sequence is built from, not just the first.
+        private static ReadOnlySequence<byte> CreateMultiSegment(BufferManager bufferManager, byte[] data, int segmentSize)
         {
-            var first = new Segment(data.AsMemory(0, Math.Min(segmentSize, data.Length)));
-            Segment last = first;
-            for (int i = segmentSize; i < data.Length; i += segmentSize)
+            Segment first = null;
+            Segment last = null;
+
+            for (int i = 0; i < data.Length; i += segmentSize)
             {
-                last = last.Append(data.AsMemory(i, Math.Min(segmentSize, data.Length - i)));
+                int length = Math.Min(segmentSize, data.Length - i);
+                byte[] rented = bufferManager.TakeBuffer(length);
+                Array.Copy(data, i, rented, 0, length);
+
+                ReadOnlyMemory<byte> memory = new(rented, 0, length);
+                last = first is null ? first = new Segment(memory) : last.Append(memory);
             }
 
             return new ReadOnlySequence<byte>(first, 0, last, last.Memory.Length);

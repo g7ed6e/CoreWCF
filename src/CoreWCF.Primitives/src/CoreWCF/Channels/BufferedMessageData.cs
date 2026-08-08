@@ -13,7 +13,7 @@ namespace CoreWCF.Channels
     {
         private ReadOnlySequence<byte> _readOnlyBuffer;
         private BufferManager _bufferManager;
-        private byte[] _rentedBuffer;
+        private ReadOnlySequence<byte> _rentedBuffer;
         private int _refCount;
         private int _outstandingReaders;
         private bool _closePending;
@@ -85,13 +85,7 @@ namespace CoreWCF.Channels
 
         private void Release()
         {
-            if (_bufferManager != null && _rentedBuffer != null)
-            {
-                _bufferManager.ReturnBuffer(_rentedBuffer);
-            }
-
-            _bufferManager = null;
-            _rentedBuffer = null;
+            ReturnRentedBuffer();
             _readOnlyBuffer = default;
             OnClosed();
         }
@@ -215,15 +209,32 @@ namespace CoreWCF.Channels
         /// </summary>
         public void OwnBuffer(ReadOnlySequence<byte> rentedBuffer, BufferManager bufferManager)
         {
-            if (bufferManager != null
-                && !rentedBuffer.IsEmpty
-                && rentedBuffer.IsSingleSegment
-                && MemoryMarshal.TryGetArray(rentedBuffer.First, out ArraySegment<byte> segment)
-                && segment.Array != null)
+            if (bufferManager != null && !rentedBuffer.IsEmpty)
             {
-                _rentedBuffer = segment.Array;
+                _rentedBuffer = rentedBuffer;
                 _bufferManager = bufferManager;
             }
+        }
+
+        private void ReturnRentedBuffer()
+        {
+            if (_bufferManager == null)
+            {
+                return;
+            }
+
+            // One array per segment: a message received in pieces is chained rather than copied
+            // into a single buffer, and every piece came from the manager.
+            foreach (ReadOnlyMemory<byte> memory in _rentedBuffer)
+            {
+                if (MemoryMarshal.TryGetArray(memory, out ArraySegment<byte> segment) && segment.Array != null)
+                {
+                    _bufferManager.ReturnBuffer(segment.Array);
+                }
+            }
+
+            _bufferManager = null;
+            _rentedBuffer = default;
         }
 
         protected abstract void ReturnXmlReader(XmlDictionaryReader xmlReader);

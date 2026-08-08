@@ -1457,48 +1457,6 @@ namespace CoreWCF.Channels
             }
         }
 
-        private sealed class SequenceBuilder<T>
-        {
-            private class MemorySegment<TU> : ReadOnlySequenceSegment<TU>
-            {
-                public MemorySegment(ReadOnlyMemory<TU> memory)
-                {
-                    Memory = memory;
-                }
-
-                public MemorySegment<TU> Append(ReadOnlyMemory<TU> memory)
-                {
-                    var segment = new MemorySegment<TU>(memory)
-                    {
-                        RunningIndex = RunningIndex + Memory.Length
-                    };
-
-                    Next = segment;
-
-                    return segment;
-                }
-            }
-
-            private readonly MemorySegment<T> _first;
-            private MemorySegment<T> _last;
-
-            public SequenceBuilder(ReadOnlyMemory<T> memory)
-            {
-                _last = _first = new MemorySegment<T>(memory);
-            }
-
-            public SequenceBuilder<T> Append(ReadOnlySequence<T> readOnlySequence)
-            {
-                foreach (var memory in readOnlySequence)
-                {
-                    _last = _last.Append(memory);
-                }
-
-                return this;
-            }
-
-            public ReadOnlySequence<T> Build() => new(_first, 0, _last, _last.Memory.Length);
-        }
 
         private sealed class PatternMessage : ReceivedMessage
         {
