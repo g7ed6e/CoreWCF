@@ -18,7 +18,7 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | | State |
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
-| **M2 — first generator slice** | In progress. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. Everything else reports unsupported and skips. |
+| **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
 | **M3+ — deferred** | Collections, enums, inheritance, `[KnownType]`/`i:type`, `IsReference`/`z:Id`, `ReadObject`, and the seam gaps below. |
 
 ## What the switch does
@@ -99,6 +99,24 @@ The serializer explicitly declares a namespace in exactly two places:
 ## Risk register
 
 Ordered by how much each threatens the milestone.
+
+### 0. What the first slice actually proved
+
+Reading the algorithm before writing the emitter worked: the first three cases matched byte for byte
+on the first run, with no iteration on prefixes at all. The two findings that carried it were that
+prefix allocation belongs to the writer, and that primitive formatting is `writer.WriteValue` with
+exactly three exceptions (`char` as a number, `Guid`/`TimeSpan` via `WriteRaw`, `byte[]` as base64).
+
+Two build-level traps cost more time than the serialization did, and are worth remembering:
+
+- **The shipped `.targets` cannot be imported from a project body.** NuGet injects it after the SDK
+  targets, where `TargetFrameworkIdentifier` is populated; an import in the body evaluates earlier,
+  silently sees an empty value, and disables the generator with no error. In-repo consumers must
+  mirror the gate conditioned on `$(TargetFramework)` instead.
+- **`EmitCompilerGeneratedFiles` poisons the next build.** It writes under the project directory
+  where the default glob compiles it as ordinary source, so every generated member is then declared
+  twice. The test project excludes `generated/**`. Note also that cleanup can fail *silently* on
+  these paths - they exceed `MAX_PATH`, and PowerShell's `Remove-Item` swallows it.
 
 ### 1. Byte-exactness — largely mitigated, not eliminated
 
