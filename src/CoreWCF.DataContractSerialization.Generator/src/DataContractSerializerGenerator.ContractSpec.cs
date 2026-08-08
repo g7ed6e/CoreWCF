@@ -10,7 +10,7 @@ public sealed partial class DataContractSerializerGenerator
     /// <summary>One data contract, reduced to what the emitter needs to write it.</summary>
     /// <remarks>
     /// A contract the generator cannot yet write is kept in the spec with
-    /// <see cref="UnsupportedReason"/> set rather than dropped, so the emitter can record why in a
+    /// <see cref="UnsupportedReasons"/> set rather than dropped, so the emitter can record why in a
     /// comment. No serializer is emitted for it and <c>GetSerializer</c> returns null, which sends
     /// CoreWCF back to the reflection-based serializer - a correct outcome, not a failure.
     /// </remarks>
@@ -19,7 +19,7 @@ public sealed partial class DataContractSerializerGenerator
         string ContractName,
         string ContractNamespace,
         EquatableArray<MemberSpec> Members,
-        string? UnsupportedReason,
+        EquatableArray<string> UnsupportedReasons,
         string? BaseContractFullyQualifiedName,
         bool IsRoot) : IEquatable<ContractSpec>
     {
@@ -44,11 +44,19 @@ public sealed partial class DataContractSerializerGenerator
         /// </remarks>
         public EquatableArray<string> KnownTypes { get; init; } = new EquatableArray<string>(Array.Empty<string>());
 
-        public bool IsSupported => UnsupportedReason is null;
+        public bool IsSupported => UnsupportedReasons.Count == 0;
 
-        /// <summary>Same contract, newly declared unsupported.</summary>
+        /// <summary>
+        /// Same contract, with one more reason it cannot be written.
+        /// </summary>
+        /// <remarks>
+        /// Every reason is kept rather than only the first. A wide contract can be blocked on
+        /// several unrelated things at once, and reporting one at a time makes the remaining work
+        /// look like a fraction of what it is - which is exactly how AllTypes was misread as one
+        /// capability away when it needed eight.
+        /// </remarks>
         public ContractSpec WithUnsupportedReason(string reason) =>
-            UnsupportedReason is null ? this with { UnsupportedReason = reason } : this;
+            this with { UnsupportedReasons = UnsupportedReasons.Add(reason) };
     }
 
     /// <summary>

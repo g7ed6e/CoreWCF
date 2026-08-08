@@ -29,6 +29,19 @@ internal readonly struct EquatableArray<T> : IEquatable<EquatableArray<T>>, IRea
 
     public T this[int index] => _items![index];
 
+    /// <summary>A copy with one more item appended.</summary>
+    public EquatableArray<T> Add(T item)
+    {
+        T[] items = new T[Count + 1];
+        for (int i = 0; i < Count; i++)
+        {
+            items[i] = _items![i];
+        }
+
+        items[Count] = item;
+        return new EquatableArray<T>(items);
+    }
+
     public bool Equals(EquatableArray<T> other)
     {
         if (ReferenceEquals(_items, other._items))

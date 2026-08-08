@@ -789,6 +789,80 @@ namespace App
         }
 
         [Fact]
+        public void AContractBlockedOnSeveralThings_ReportsEveryReason()
+        {
+            // The coverage report used to record the first reason and stop, which made a wide
+            // contract read like a single blocker when it was one of many - and did exactly that
+            // once, for AllTypes.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Awkward
+    {
+        [DataMember] public System.Collections.ArrayList Untyped { get; set; }
+        [DataMember] public System.Collections.Generic.Dictionary<string, string> Map { get; set; }
+        [DataMember] private int _hidden;
+    }
+
+    [DataContractSerializable(typeof(Awkward))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("member 'Untyped' has unsupported type", result.SingleSource);
+            Assert.Contains("member 'Map' has unsupported type", result.SingleSource);
+            Assert.Contains("member '_hidden' is not public", result.SingleSource);
+        }
+
+        [Fact]
+        public void ByValueContractMember_IsGuardedAgainstCycles()
+        {
+            // A contract written by value can be cyclic, and the generated writer would recurse
+            // until the stack ran out. DataContractSerializer throws past a depth of 512 instead,
+            // and a StackOverflowException cannot be caught - so the generated path matches it.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Node
+    {
+        [DataMember] public Node Next { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Node))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("scope.EnterByValue(value.Next);", result.SingleSource);
+            Assert.Contains("scope.ExitByValue(value.Next);", result.SingleSource);
+            Assert.Contains("private const int DepthToCheckCyclicReference = 512;", result.SingleSource);
+        }
+
+        [Fact]
+        public void IsReferenceContractMember_IsNotGuarded()
+        {
+            // A reference-preserving contract cannot recurse forever: the second sight of an
+            // instance is a z:Ref with no content, so the guard would be dead weight.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(IsReference = true)]
+    public class Node
+    {
+        [DataMember] public Node Next { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Node))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.DoesNotContain("scope.EnterByValue", result.SingleSource);
+        }
+
+        [Fact]
         public void XmlQualifiedNameMember_GetsItsOwnElementPrefix()
         {
             // The one member type whose element carries a prefix of its own rather than reusing

@@ -285,7 +285,7 @@ public sealed partial class DataContractSerializerGenerator
                 && contracts.TryGetValue(baseName, out ContractSpec baseSpec)
                 && !baseSpec.IsSupported)
             {
-                return "base contract " + baseName + " is not supported (" + baseSpec.UnsupportedReason + ")";
+                return "base contract " + baseName + " is not supported (" + string.Join("; ", baseSpec.UnsupportedReasons) + ")";
             }
 
             foreach (MemberSpec member in spec.Members)
@@ -295,7 +295,7 @@ public sealed partial class DataContractSerializerGenerator
                     && !nestedSpec.IsSupported)
                 {
                     return "member '" + member.MemberName + "' has unsupported contract type " + nested +
-                           " (" + nestedSpec.UnsupportedReason + ")";
+                           " (" + string.Join("; ", nestedSpec.UnsupportedReasons) + ")";
                 }
 
                 // A polymorphic member is only writable if every type it may hold is. Missing one
@@ -307,7 +307,7 @@ public sealed partial class DataContractSerializerGenerator
                         && !candidateSpec.IsSupported)
                     {
                         return "member '" + member.MemberName + "' may hold unsupported contract type " + candidate +
-                               " (" + candidateSpec.UnsupportedReason + ")";
+                               " (" + string.Join("; ", candidateSpec.UnsupportedReasons) + ")";
                     }
                 }
             }
@@ -326,7 +326,7 @@ public sealed partial class DataContractSerializerGenerator
             string contractName = (dataContract is null ? null : GetNamedArgument(dataContract, "Name")) ?? contractType.Name;
             string contractNamespace = (dataContract is null ? null : GetNamedArgument(dataContract, "Namespace")) ?? DefaultNamespaceFor(contractType);
 
-            string? unsupportedReason = null;
+            List<string> unsupportedReasons = new();
 
             // IsReference makes the serializer emit z:Id and z:Ref to preserve object identity.
             // It is inherited, so a derived contract that says nothing still gets it from its base -
@@ -337,13 +337,13 @@ public sealed partial class DataContractSerializerGenerator
             // ignoring the request - so decline and let the reflection path throw as it does today.
             if (isReference && contractType.IsValueType)
             {
-                unsupportedReason = "IsReference is not valid on a value type";
+                unsupportedReasons.Add("IsReference is not valid on a value type");
             }
 
             List<INamedTypeSymbol> knownTypes = new();
             if (!TryCollectKnownTypes(contractType, knownTypes, out string? knownTypeReason))
             {
-                unsupportedReason ??= knownTypeReason;
+                unsupportedReasons.Add(knownTypeReason!);
             }
 
             // A contract from another assembly is only safe if every one of its data members is
@@ -351,12 +351,11 @@ public sealed partial class DataContractSerializerGenerator
             // in which case they would be silently dropped - producing wrong XML rather than
             // falling back. Since their absence is indistinguishable from their not existing, the
             // only sound answer is to decline the whole contract.
-            if (unsupportedReason is null
-                && !SymbolEqualityComparer.Default.Equals(contractType.ContainingAssembly, contextAssembly))
+            if (!SymbolEqualityComparer.Default.Equals(contractType.ContainingAssembly, contextAssembly))
             {
-                unsupportedReason = "contract is declared in another assembly (" +
-                                    contractType.ContainingAssembly.Name +
-                                    "), where non-public data members may not be visible to the generator";
+                unsupportedReasons.Add("contract is declared in another assembly (" +
+                                       contractType.ContainingAssembly.Name +
+                                       "), where non-public data members may not be visible to the generator");
             }
 
             INamedTypeSymbol? baseContract = contractType.BaseType is INamedTypeSymbol candidate
@@ -375,25 +374,23 @@ public sealed partial class DataContractSerializerGenerator
             // Only a data-contract base participates: a contract at the root of its hierarchy is
             // free to turn IsReference on, which is how every reference-preserving graph starts.
             // See ClassDataContractCriticalHelper.EnsureIsReferenceImported in dotnet/runtime.
-            if (unsupportedReason is null
-                && baseContract is not null
+            if (baseContract is not null
                 && dataContract is not null
                 && GetNamedArgumentBoolean(dataContract, "IsReference") is bool declaredIsReference
                 && declaredIsReference != InheritsIsReference(baseContract))
             {
-                unsupportedReason = "IsReference = " + (declaredIsReference ? "true" : "false") +
-                                    " contradicts base contract " + baseContract.Name +
-                                    ", which DataContractSerializer rejects";
+                unsupportedReasons.Add("IsReference = " + (declaredIsReference ? "true" : "false") +
+                                       " contradicts base contract " + baseContract.Name +
+                                       ", which DataContractSerializer rejects");
             }
 
             // A base class that is not itself a data contract contributes no members but is also
             // not something this generator can reason about, so decline.
-            if (unsupportedReason is null
-                && baseContract is null
+            if (baseContract is null
                 && contractType.BaseType is { SpecialType: not SpecialType.System_Object } other
                 && other.SpecialType != SpecialType.System_ValueType)
             {
-                unsupportedReason = "base type " + other.Name + " is not a data contract";
+                unsupportedReasons.Add("base type " + other.Name + " is not a data contract");
             }
 
             List<MemberSpec> members = new();
@@ -453,14 +450,14 @@ public sealed partial class DataContractSerializerGenerator
                 // context can see. Anything less visible keeps its contract on the reflection path.
                 if (member.DeclaredAccessibility != Accessibility.Public)
                 {
-                    unsupportedReason ??= "member '" + member.Name + "' is not public";
+                    unsupportedReasons.Add("member '" + member.Name + "' is not public");
                 }
 
                 MemberKind kind = ClassifyMember(memberType, out bool isNullableValueType, out INamedTypeSymbol? nestedContract);
                 if (kind == MemberKind.Unsupported)
                 {
-                    unsupportedReason ??= "member '" + member.Name + "' has unsupported type '" +
-                                          memberType.ToDisplayString() + "'";
+                    unsupportedReasons.Add("member '" + member.Name + "' has unsupported type '" +
+                                          memberType.ToDisplayString() + "'");
                 }
 
                 List<string> candidates = new();
@@ -483,7 +480,7 @@ public sealed partial class DataContractSerializerGenerator
                     List<INamedTypeSymbol> inScope = new(knownTypes);
                     if (!TryCollectKnownTypes(nestedContract, inScope, out string? memberKnownTypeReason))
                     {
-                        unsupportedReason ??= memberKnownTypeReason;
+                        unsupportedReasons.Add(memberKnownTypeReason!);
                     }
 
                     foreach (INamedTypeSymbol derived in PolymorphicCandidates(nestedContract, inScope))
@@ -497,8 +494,8 @@ public sealed partial class DataContractSerializerGenerator
                     // members for it would be wrong, so decline instead.
                     if (candidates.Count == 0 && nestedContract.IsAbstract)
                     {
-                        unsupportedReason ??= "member '" + member.Name + "' is declared as abstract contract " +
-                                              nestedContract.Name + " with no [KnownType] to resolve it";
+                        unsupportedReasons.Add("member '" + member.Name + "' is declared as abstract contract " +
+                                              nestedContract.Name + " with no [KnownType] to resolve it");
                     }
                 }
                 else if (nestedContract is not null && kind == MemberKind.Enum)
@@ -539,8 +536,8 @@ public sealed partial class DataContractSerializerGenerator
 
                         if (!IsContractType(knownType))
                         {
-                            unsupportedReason ??= "member '" + member.Name + "' is declared as object and known type " +
-                                                  knownType.Name + " is not a data contract this generator can write";
+                            unsupportedReasons.Add("member '" + member.Name + "' is declared as object and known type " +
+                                                  knownType.Name + " is not a data contract this generator can write");
                             continue;
                         }
 
@@ -562,8 +559,8 @@ public sealed partial class DataContractSerializerGenerator
 
                     if (elementKind == MemberKind.Unsupported)
                     {
-                        unsupportedReason ??= "member '" + member.Name + "' has unsupported collection element type in '" +
-                                              memberType.ToDisplayString() + "'";
+                        unsupportedReasons.Add("member '" + member.Name + "' has unsupported collection element type in '" +
+                                              memberType.ToDisplayString() + "'");
                     }
                     else if (elementEnum is not null)
                     {
@@ -622,7 +619,7 @@ public sealed partial class DataContractSerializerGenerator
                 contractName,
                 contractNamespace,
                 new EquatableArray<MemberSpec>(members.ToArray()),
-                unsupportedReason,
+                new EquatableArray<string>(unsupportedReasons.ToArray()),
                 baseContract?.ToDisplayString(FullyQualifiedFormat),
                 isRoot)
             {

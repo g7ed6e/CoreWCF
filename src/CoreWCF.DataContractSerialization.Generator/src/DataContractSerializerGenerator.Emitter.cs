@@ -158,8 +158,13 @@ public sealed partial class DataContractSerializerGenerator
                 }
                 else if (!contract.IsSupported)
                 {
-                    // Recorded rather than silently omitted: this list is the coverage report.
-                    _builder.AppendLine($"{indentor}// {contract.FullyQualifiedName}: {contract.UnsupportedReason}");
+                    // Recorded rather than silently omitted: this list is the coverage report, and
+                    // every reason goes in it rather than only the first. One line per contract
+                    // understates the work whenever a contract is blocked on several things.
+                    foreach (string reason in contract.UnsupportedReasons)
+                    {
+                        _builder.AppendLine($"{indentor}// {contract.FullyQualifiedName}: {reason}");
+                    }
                 }
             }
 
@@ -483,7 +488,7 @@ public sealed partial class DataContractSerializerGenerator
                 }
                 else
                 {
-                    _builder.AppendLine($"{indentor}{ContentWriterName(nested)}(writer, {value}, scope);");
+                    EmitByValueContentCall(indentor, nested, value, value);
                 }
             }
             else if (member.Kind == MemberKind.Collection)
@@ -604,7 +609,7 @@ public sealed partial class DataContractSerializerGenerator
                 }
                 else
                 {
-                    _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+                    EmitByValueContentCall(indentor, candidate, value, typed);
                 }
 
                 indentor.Decrement();
@@ -620,6 +625,24 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Decrement();
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
+        /// Emits a nested contract write, guarded against cycles when it is written by value.
+        /// </summary>
+        /// <remarks>
+        /// A reference-preserving contract cannot recurse forever - the second sight of an instance
+        /// is a z:Ref with no content - so only the by-value path needs the guard. Mirrors
+        /// XmlObjectSerializerWriteContext.OnHandleReference, which only starts tracking past a
+        /// depth of 512 and then throws CannotSerializeObjectWithCycles if the object is already on
+        /// the path. Without it the generated writer would recurse until the stack ran out, turning
+        /// a catchable exception into a process-killing StackOverflowException.
+        /// </remarks>
+        private void EmitByValueContentCall(Indentor indentor, string candidate, string value, string typed)
+        {
+            _builder.AppendLine($"{indentor}scope.EnterByValue({value});");
+            _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+            _builder.AppendLine($"{indentor}scope.ExitByValue({value});");
         }
 
         /// <summary>
@@ -744,7 +767,7 @@ public sealed partial class DataContractSerializerGenerator
                 }
                 else
                 {
-                    _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
+                    EmitByValueContentCall(indentor, candidate, value, typed);
                 }
 
                 indentor.Decrement();
@@ -974,7 +997,61 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
             _builder.AppendLine($"{indentor}private global::System.Collections.Generic.Dictionary<object, int> _ids;");
+            _builder.AppendLine($"{indentor}private global::System.Collections.Generic.HashSet<object> _byValueInScope;");
             _builder.AppendLine($"{indentor}private int _next = 1;");
+            _builder.AppendLine($"{indentor}private int _depth;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <summary>Depth past which a by-value graph starts being checked for cycles.</summary>");
+            _builder.AppendLine($"{indentor}private const int DepthToCheckCyclicReference = 512;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <summary>Enters a contract written by value, throwing if it is already on the path.</summary>");
+            _builder.AppendLine($"{indentor}internal void EnterByValue(object value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (++_depth < DepthToCheckCyclicReference)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (_byValueInScope == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}_byValueInScope = new global::System.Collections.Generic.HashSet<object>(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}global::System.Collections.Generic.ReferenceEqualityComparer.Instance);");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (!_byValueInScope.Add(value))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Object graph for type '\" + value.GetType().FullName + \"' contains cycles and cannot be \" +");
+            _builder.AppendLine($"{indentor}\"serialized if references are not tracked. Consider using the DataContractAttribute \" +");
+            _builder.AppendLine($"{indentor}\"with the IsReference property set to true.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}internal void ExitByValue(object value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (_depth >= DepthToCheckCyclicReference && _byValueInScope != null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}_byValueInScope.Remove(value);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}_depth--;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
             _builder.AppendLine();
             _builder.AppendLine($"{indentor}/// <summary>Returns true when z:Ref was written, meaning the content must not be repeated.</summary>");
             _builder.AppendLine($"{indentor}internal bool WriteIdOrRef({DictionaryWriter} writer, object value)");

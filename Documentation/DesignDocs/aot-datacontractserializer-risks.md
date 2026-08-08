@@ -228,18 +228,23 @@ Two things to keep in mind, neither of which the harness can currently catch on 
   made the failure look like a compiler crash rather than a bug in the emitted source. When csc dies
   silently, dump the generated file and compile it as an ordinary source to get the real error.
 
-### 4a. A cycle without `IsReference` overflows the stack instead of throwing
+### 4a. ~~A cycle without `IsReference` overflows the stack instead of throwing~~ — closed
 
 `DataContractSerializer` counts nesting depth and, past 512 levels, checks whether the object is
-already on the stack and throws `CannotSerializeObjectWithCycles`
-(`XmlObjectSerializerWriteContext.OnHandleReference`). The generator does not carry that counter, so
-the same graph recurses until the stack runs out.
+already on the path and throws `CannotSerializeObjectWithCycles`
+(`XmlObjectSerializerWriteContext.OnHandleReference`). The generator now carries the same counter,
+in the per-call scope that already tracks `z:Id`, and wraps every by-value contract write in
+`EnterByValue`/`ExitByValue`. Reference-preserving contracts are left unguarded on purpose: the
+second sight of an instance is a `z:Ref` with no content, so they cannot recurse forever.
 
-Only reachable when a **non**-`IsReference` contract holds a genuine cycle — a graph the real
-serializer also refuses, so no valid document is affected and no corpus case exercises it. What
-differs is the failure mode: a catchable `SerializationException` becomes a process-killing
-`StackOverflowException`. Cheap to close (a depth counter threaded alongside the reference scope);
-left open deliberately rather than by oversight, and worth closing before the package ships.
+The golden-record corpus cannot cover this — the real serializer refuses such a graph, so there is
+no output to record — so `CyclicGraphTests` covers it directly instead: both paths must throw
+`SerializationException` for the same cyclic graph, and a 600-deep chain must still come out
+byte-identical, which is what stops the guard mistaking depth for a cycle.
+
+One difference from upstream worth knowing: the 512 is counted in nested contracts here and in
+XML writer depth there, so the exact level at which the throw happens can differ. That is not
+observable in a valid document, where neither throws at all.
 
 ### 4c. ~~`AllTypes` needs eight capabilities, not one~~ — closed, but the reporting lesson stands
 
@@ -266,10 +271,10 @@ implemented narrowly: the array writer covers `object[]` of primitives and bare 
 otherwise, because a contract or enum inside an untyped array would need the containing contract's
 known types, which an item writer shared across the whole context does not have.
 
-The reporting lesson stands regardless: `ParseContract` records the **first** reason a contract is
-declined and stops, so a wide contract reads like a single blocker when it is one of many. That
-misled a coverage estimate once already. Collecting every reason rather than the first would make
-the remaining work legible.
+The reporting lesson is now fixed rather than only noted: `ParseContract` used to record the **first**
+reason a contract was declined and stop, so a wide contract read like a single blocker when it was
+one of many — which misled a coverage estimate once. It now collects every reason, and the emitted
+report prints one line per reason. `DateTimeOnlyWrapper` immediately went from one line to four.
 
 The general lesson is about the report, not the contract: a coverage report that names one cause per
 contract will understate the work whenever the contract is wide. Collecting every reason rather than
