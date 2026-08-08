@@ -16,6 +16,7 @@ namespace CoreWCF.Channels
         private byte[] _rentedBuffer;
         private int _refCount;
         private int _outstandingReaders;
+        private bool _closePending;
         private bool _multipleUsers;
         private RecycledMessageState _messageState;
         private readonly SynchronizedPool<RecycledMessageState> _messageStatePool;
@@ -62,16 +63,28 @@ namespace CoreWCF.Channels
         {
             if (_outstandingReaders == 0)
             {
-                if (_bufferManager != null && _rentedBuffer != null)
-                {
-                    _bufferManager.ReturnBuffer(_rentedBuffer);
-                }
-
-                _bufferManager = null;
-                _rentedBuffer = null;
-                _readOnlyBuffer = default;
-                OnClosed();
+                Release();
             }
+            else
+            {
+                // A body reader is still out, so the buffer can't go back yet without being
+                // recycled underneath it. DoReturnXmlReader finishes the job when the last one
+                // closes; without this the buffer and the pooled message data are stranded.
+                _closePending = true;
+            }
+        }
+
+        private void Release()
+        {
+            if (_bufferManager != null && _rentedBuffer != null)
+            {
+                _bufferManager.ReturnBuffer(_rentedBuffer);
+            }
+
+            _bufferManager = null;
+            _rentedBuffer = null;
+            _readOnlyBuffer = default;
+            OnClosed();
         }
 
         public void DoReturnMessageState(RecycledMessageState messageState)
@@ -90,6 +103,12 @@ namespace CoreWCF.Channels
         {
             ReturnXmlReader(reader);
             _outstandingReaders--;
+
+            if (_closePending && _outstandingReaders == 0)
+            {
+                _closePending = false;
+                Release();
+            }
         }
 
         public RecycledMessageState DoTakeMessageState()

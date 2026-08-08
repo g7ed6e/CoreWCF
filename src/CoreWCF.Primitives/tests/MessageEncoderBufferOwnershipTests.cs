@@ -4,6 +4,7 @@
 using System.Buffers;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
 using CoreWCF.Channels;
 using Xunit;
 
@@ -16,7 +17,7 @@ namespace CoreWCF.Primitives.Tests
     {
         private const string Soap11Message =
             @"<?xml version=""1.0"" encoding=""utf-8""?>
-<soap:Envelope xmlns:soap=""http://schemas.xmlsoap.org/soap/envelope/""><soap:Body /></soap:Envelope>";
+<soap:Envelope xmlns:soap=""http://schemas.xmlsoap.org/soap/envelope/""><soap:Body><Ping xmlns=""http://tempuri.org/"" /></soap:Body></soap:Envelope>";
 
         [Fact]
         public async Task ClosingTheMessage_ReturnsTheBufferToTheBufferManager()
@@ -36,6 +37,31 @@ namespace CoreWCF.Primitives.Tests
             message.Close();
 
             // Back in the pool, so the next request for the same size hands out the same array.
+            Assert.Same(rented, bufferManager.TakeBuffer(messageBytes.Length));
+        }
+
+        [Fact]
+        public async Task ClosingTheMessageWhileABodyReaderIsStillOpen_DefersTheReturnUntilTheReaderCloses()
+        {
+            byte[] messageBytes = Encoding.UTF8.GetBytes(Soap11Message);
+            BufferManager bufferManager = BufferManager.CreateBufferManager(int.MaxValue, int.MaxValue);
+
+            byte[] rented = bufferManager.TakeBuffer(messageBytes.Length);
+            messageBytes.CopyTo(rented, 0);
+
+            MessageEncoder encoder = new TextMessageEncodingBindingElement { MessageVersion = MessageVersion.Soap11 }
+                .CreateMessageEncoderFactory()
+                .Encoder;
+
+            Message message = await encoder.ReadMessageAsync(
+                new ReadOnlySequence<byte>(rented, 0, messageBytes.Length), bufferManager, "text/xml; charset=utf-8");
+
+            XmlDictionaryReader reader = message.GetReaderAtBodyContents();
+            message.Close();
+            reader.Close();
+
+            // Closing the message could not release the buffer while the reader was reading out of
+            // it, so closing the reader has to be what completes the job.
             Assert.Same(rented, bufferManager.TakeBuffer(messageBytes.Length));
         }
 

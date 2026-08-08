@@ -9750,6 +9750,9 @@
   <data name="BufferMaximumSizeExceeded" xml:space="preserve">
     <value>Cannot allocate a buffer of size {0}.</value>
   </data>
+  <data name="BufferCannotBeEmpty" xml:space="preserve">
+    <value>The buffer cannot be empty</value>
+  </data>
   <data name="BufferedMessageDataBufferNotSupported" xml:space="preserve">
     <value>The message body is no longer backed by a single array. Use IBufferedMessageData2.ReadOnlyBuffer instead.</value>
   </data>

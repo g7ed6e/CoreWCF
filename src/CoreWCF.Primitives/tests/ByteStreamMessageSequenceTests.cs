@@ -91,12 +91,10 @@ namespace CoreWCF.Primitives.Tests
         }
 
         [Fact]
-        public async Task EmptySequence_ProducesAMessageWithAnEmptyBody()
+        public async Task EmptySequenceIsRejected()
         {
-            Message message = await Encoder.ReadMessageAsync(ReadOnlySequence<byte>.Empty, BufferManager, ContentType);
-
-            Assert.NotNull(message);
-            Assert.Empty(message.GetBody<byte[]>());
+            await Assert.ThrowsAsync<ArgumentException>(
+                () => Encoder.ReadMessageAsync(ReadOnlySequence<byte>.Empty, BufferManager, ContentType).AsTask());
         }
 
         [Fact]
