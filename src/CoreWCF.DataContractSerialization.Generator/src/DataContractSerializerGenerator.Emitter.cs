@@ -40,6 +40,8 @@ public sealed partial class DataContractSerializerGenerator
         private const string SchemaNamespace = "http://www.w3.org/2001/XMLSchema";
         private const string SystemContractNamespace = Parser.SystemContractNamespace;
         private const string ReferenceScope = "__ReferenceScope";
+
+        private const string ReadScope = "__ReadScope";
         private const string DateOnlyIsPrimitive = "__DateOnlyIsPrimitive";
         private const string DictionaryReader = "global::System.Xml.XmlDictionaryReader";
 
@@ -102,6 +104,7 @@ public sealed partial class DataContractSerializerGenerator
             EmitReadHelpers(indentor);
             EmitAnyTypeHelper(indentor);
             EmitReferenceScope(indentor);
+            EmitReadScope(indentor);
 
             if (context.Enums.Count > 0)
             {
@@ -446,6 +449,9 @@ public sealed partial class DataContractSerializerGenerator
             // it here.
             EquatableArray<string> candidates = DerivedCandidates(contract);
 
+            // One scope per ReadObject call, so ids restart with every document and nothing survives
+            // between calls - the mirror of what WriteObject does with its own.
+            _builder.AppendLine($"{indentor}{ReadScope} scope = new {ReadScope}();");
             _builder.AppendLine($"{indentor}{contract.FullyQualifiedName} result = default;");
             _builder.AppendLine();
 
@@ -1375,6 +1381,82 @@ public sealed partial class DataContractSerializerGenerator
         /// which is what puts xmlns:z on the root for a reference root and on the member element
         /// when only a nested contract is one.
         /// </remarks>
+        /// <summary>
+        /// Emits the per-call table behind reading <c>IsReference</c>: <c>z:Id</c> to object.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The inverse of <see cref="EmitReferenceScope"/>, and much the smaller of the two, because
+        /// a <c>z:Ref</c> never points forward. The writer assigns an id the first time it writes an
+        /// instance, so the element carrying <c>z:Id</c> is always written - and therefore read -
+        /// before any reference to it. There is nothing to defer and no fixup pass to run;
+        /// XmlObjectSerializerReadContext.GetExistingObject throws outright on an id it has not
+        /// seen, and this does the same.
+        /// </para>
+        /// <para>
+        /// What makes a cycle work is <em>when</em> an object is recorded rather than any patching
+        /// up afterwards - see the remark on Add.
+        /// </para>
+        /// </remarks>
+        private void EmitReadScope(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private sealed class {ReadScope}");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}private global::System.Collections.Generic.Dictionary<string, object> _byId;");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <summary>Records an instance under its z:Id, before any of its members are read.</summary>");
+            _builder.AppendLine($"{indentor}/// <remarks>");
+            _builder.AppendLine($"{indentor}/// Before, not after. An instance inside its own graph is referred to while it is still");
+            _builder.AppendLine($"{indentor}/// being filled in - which is what a cycle is - so recording it late would turn a z:Ref");
+            _builder.AppendLine($"{indentor}/// into a lookup that fails. Mirrors AddNewObject, which upstream calls before");
+            _builder.AppendLine($"{indentor}/// deserializing members for the same reason.");
+            _builder.AppendLine($"{indentor}/// </remarks>");
+            _builder.AppendLine($"{indentor}internal void Add(string id, object value)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (id == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (_byId == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}_byId = new global::System.Collections.Generic.Dictionary<string, object>(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}global::System.StringComparer.Ordinal);");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}_byId[id] = value;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}internal object Get(string id)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (_byId != null && _byId.TryGetValue(id, out object value))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return value;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Deserialized object with reference id '\" + id + \"' not found.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
         private void EmitReferenceScope(Indentor indentor)
         {
             _builder.AppendLine();
@@ -1963,7 +2045,7 @@ public sealed partial class DataContractSerializerGenerator
         private void EmitContentReader(Indentor indentor, ContractSpec contract)
         {
             _builder.AppendLine($"{indentor}/// <summary>Reads the members of {contract.ContractName} into an existing instance.</summary>");
-            _builder.AppendLine($"{indentor}private static void {ContentReaderName(contract)}({DictionaryReader} reader, {(contract.IsValueType ? "ref " : string.Empty)}{contract.FullyQualifiedName} value)");
+            _builder.AppendLine($"{indentor}private static void {ContentReaderName(contract)}({DictionaryReader} reader, {(contract.IsValueType ? "ref " : string.Empty)}{contract.FullyQualifiedName} value, {ReadScope} scope)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
             List<(MemberSpec Member, string Namespace)> members = FlattenedMembers(contract);
@@ -2309,9 +2391,42 @@ public sealed partial class DataContractSerializerGenerator
         /// </remarks>
         private void EmitTypedContractRead(Indentor indentor, ContractSpec contract, string target)
         {
+            if (!contract.IsReference)
+            {
+                EmitConstructAndRead(indentor, contract, target);
+                return;
+            }
+
+            // A z:Ref carries nothing but the attribute, so the element is skipped whole. It can
+            // only point backwards - the writer assigns an id the first time it writes an instance -
+            // so an id that is not in the table is a malformed document rather than one to revisit.
+            _builder.AppendLine($"{indentor}string __ref = reader.GetAttribute(\"Ref\", {Literal(SerializationNamespace)});");
+            _builder.AppendLine($"{indentor}if (__ref != null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}{target} = ({contract.FullyQualifiedName})scope.Get(__ref);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            EmitConstructAndRead(indentor, contract, target);
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        private void EmitConstructAndRead(Indentor indentor, ContractSpec contract, string target)
+        {
             string typeName = contract.FullyQualifiedName;
 
             _builder.AppendLine($"{indentor}{typeName} __typed = new {typeName}();");
+
+            if (contract.IsReference)
+            {
+                _builder.AppendLine($"{indentor}scope.Add(reader.GetAttribute(\"Id\", {Literal(SerializationNamespace)}), __typed);");
+            }
+
             _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
@@ -2323,7 +2438,7 @@ public sealed partial class DataContractSerializerGenerator
             indentor.Increment();
             _builder.AppendLine($"{indentor}reader.ReadStartElement();");
             _builder.AppendLine($"{indentor}reader.MoveToContent();");
-            _builder.AppendLine($"{indentor}{ContentReaderName(contract)}(reader, {(contract.IsValueType ? "ref " : string.Empty)}__typed);");
+            _builder.AppendLine($"{indentor}{ContentReaderName(contract)}(reader, {(contract.IsValueType ? "ref " : string.Empty)}__typed, scope);");
             _builder.AppendLine($"{indentor}reader.ReadEndElement();");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
@@ -2744,7 +2859,6 @@ public sealed partial class DataContractSerializerGenerator
 
             bool readable = contract.IsSupported
                 && contract.HasParameterlessConstructor
-                && !contract.IsReference
                 && BaseChainIsKnown(contract)
                 && EveryDerivedContractIsReadable(contract);
 

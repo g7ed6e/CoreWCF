@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Runtime.Serialization;
@@ -6,6 +6,7 @@ using System.Xml;
 using CoreWCF.DataContractSerialization.TestCorpus;
 using CoreWCF.DataContractSerialization.Tests.Harness;
 using CoreWCF.Runtime.Serialization;
+using CoreWCF.DataContractSerialization.TestCorpus.Sanity;
 using SerializationTestTypes;
 using Xunit;
 
@@ -34,6 +35,56 @@ namespace CoreWCF.DataContractSerialization.Tests
             first.next = second;
             second.next = first;
             return first;
+        }
+
+        /// <summary>
+        /// A cycle read back through IsReference is a cycle, not a copy of one.
+        /// </summary>
+        /// <remarks>
+        /// The golden-record test already proves this indirectly - writing the recovered graph back
+        /// out reproduces the same z:Id and z:Ref pattern, which only happens if the identities
+        /// match - but that is a byte comparison standing in for an object-identity claim. This
+        /// states the claim directly, and it is the property IsReference exists for.
+        /// </remarks>
+        [Fact]
+        public void GeneratedReader_RecoversACycleRatherThanACopy()
+        {
+            CorpusCase corpusCase = CorpusCatalog.GetById(
+                "CoreWCF.DataContractSerialization.TestCorpus.Sanity.SanityReferenceNode.cycle");
+
+            XmlDictionary dictionary = new XmlDictionary(2);
+            AotXmlObjectSerializer serializer = new GeneratedCorpusContext().GetSerializer(
+                corpusCase.ContractType,
+                dictionary.Add(corpusCase.RootName),
+                dictionary.Add(corpusCase.RootNamespace));
+
+            if (serializer == null)
+            {
+                Assert.Skip(
+                    "The generator does not run on " + TargetFrameworkInfo.Current +
+                    ", so there is no generated serializer to exercise.");
+                return;
+            }
+
+            Assert.True(serializer.CanReadObject);
+
+            byte[] recorded;
+            string resolvedPath;
+            Assert.True(FixtureStore.TryRead(corpusCase.FixtureFileName, out recorded, out resolvedPath));
+
+            SanityReferenceNode first = Assert.IsType<SanityReferenceNode>(
+                FixtureReader.Read(serializer, recorded));
+
+            Assert.Equal("first", first.Name);
+            Assert.Same(first, first.Self);
+
+            SanityReferenceNode second = first.Next;
+            Assert.Equal("second", second.Name);
+            Assert.Same(second, second.Self);
+
+            // The one that could only come from the id table: second.Next points back at a node the
+            // reader was still filling in when it read the reference.
+            Assert.Same(first, second.Next);
         }
 
         [Fact]

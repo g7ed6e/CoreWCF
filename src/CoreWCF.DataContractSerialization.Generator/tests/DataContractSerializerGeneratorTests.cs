@@ -577,6 +577,46 @@ namespace App
         }
 
         [Fact]
+        public void IsReferenceContract_ResolvesARefAndRecordsAnIdBeforeReadingMembers()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(IsReference = true)]
+    public class Node
+    {
+        [DataMember] public Node Next { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Node))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // A z:Ref carries nothing but the attribute, so the element is skipped whole.
+            Assert.Contains(
+                "string __ref = reader.GetAttribute(\"Ref\", \"http://schemas.microsoft.com/2003/10/Serialization/\");",
+                result.SingleSource);
+            Assert.Contains("scope.Get(__ref);", result.SingleSource);
+
+            // The id is recorded before the members are read, which is the whole of what makes a
+            // cycle work - an instance inside its own graph is referred to while it is still being
+            // filled in. Recording it after would turn that reference into a lookup that fails.
+            int construct = result.SingleSource.IndexOf(
+                "global::App.Node __typed = new global::App.Node();",
+                StringComparison.Ordinal);
+            Assert.True(construct > 0, "The instance should be constructed before anything else.");
+
+            int record = result.SingleSource.IndexOf(
+                "scope.Add(reader.GetAttribute(\"Id\"", construct, StringComparison.Ordinal);
+            int readMembers = result.SingleSource.IndexOf("__ReadContent0(reader", construct, StringComparison.Ordinal);
+
+            Assert.True(record > construct, "The id is recorded once the instance exists.");
+            Assert.True(readMembers > record, "The id is recorded before any member is read.");
+        }
+
+        [Fact]
         public void JaggedArrayMember_ReadsEachInnerArrayAsACollectionOfItsOwn()
         {
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"

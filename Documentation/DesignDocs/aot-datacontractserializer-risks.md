@@ -20,7 +20,7 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
 | **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **81 of 86** corpus cases byte-match; the five that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **51 of 86** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Every capability except object identity. What still skips is `IsReference`, plus two contracts with no accessible parameterless constructor - which generated code cannot work around at all. See "The read algorithm" below. |
+| **M4 — `ReadObject`** | Done for the corpus. **79 of 86** cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Five of the seven that skip have no generated serializer at all (the write-side exclusions); the other two have no accessible parameterless constructor, which generated code cannot work around. Read coverage is therefore write coverage minus exactly those two. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -391,6 +391,40 @@ That is also why `SanityUntypedCollections` exists: the upstream cases covering 
 exactly the two that cannot be read, so without it the container code would have shipped with no
 fixture exercising it.
 
+### `IsReference` needs a table, not a fixup pass
+
+This was written down wrong for several milestones, so it is worth stating plainly: **a `z:Ref`
+never points forward.** The writer assigns an id the first time it *writes* an instance, so the
+element carrying `z:Id` is written - and therefore read - before any reference to it. There is
+nothing to defer.
+
+Upstream is unambiguous. `GetExistingObject` throws `DeserializedObjectWithIdNotFound` on an id it
+has not seen rather than recording it for later, and the class comment says so directly: *"BinaryFormatter
+supports this by fixing up such references later. These XmlObjectSerializer implementations do not
+currently support fix-ups. Hence we throw."*
+
+What makes a **cycle** work is not patching up afterwards but *when* the instance is recorded:
+
+```csharp
+__typed = new Node();
+scope.Add(reader.GetAttribute("Id", ...), __typed);   // before, not after
+// ... now read the members, one of which may be a z:Ref back to __typed
+```
+
+An instance inside its own graph is referred to while it is still being filled in - that is what a
+cycle *is* - so recording it after its members would turn that reference into a lookup that fails.
+Upstream calls `AddNewObject` before deserializing members for the same reason.
+
+The reader's scope is much the smaller half of the pair: one `Dictionary<string, object>`, allocated
+on first use, one per `ReadObject` call so nothing survives between documents. The writer's scope has
+to assign ids, track by reference identity, and guard by-value recursion; the reader's only has to
+remember.
+
+`SanityReferenceNode.cycle` proves it byte-for-byte - writing the recovered graph back out reproduces
+the same `z:Id`/`z:Ref` pattern, which only happens if the identities match - and
+`CyclicGraphTests.GeneratedReader_RecoversACycleRatherThanACopy` states the same claim directly,
+since a byte comparison standing in for an object-identity claim is worth backing up once.
+
 ### What stays unreadable, and why
 
 A contract is readable only if every contract it reaches is - it is a graph question, computed with
@@ -399,7 +433,6 @@ terminates at run time on a nil or empty element rather than statically.
 
 | Not read | Reason |
 | --- | --- |
-| `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 
 ---
