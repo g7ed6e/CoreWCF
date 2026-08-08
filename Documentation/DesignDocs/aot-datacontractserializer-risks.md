@@ -20,7 +20,7 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
 | **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **80 of 85** corpus cases byte-match; the five that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **45 of 85** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Everything except object identity and boxed members: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset`, `XmlQualifiedName`, `DateOnly`, `TimeOnly` and `i:type` polymorphism. See "The read algorithm" below for what stays unreadable and why. |
+| **M4 — `ReadObject`** | In progress. **49 of 85** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Everything except object identity and two collection containers: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset`, `XmlQualifiedName`, `DateOnly`, `TimeOnly`, `i:type` polymorphism and boxed members. See "The read algorithm" below for what stays unreadable and why. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -337,6 +337,29 @@ second one - a member element declares its own, a root does not:
 instance cannot tell "resolved the name" from "took the only branch": a declared instance carrying no
 `i:type`, two different derived types carrying different ones, and a null carrying none.
 
+### A boxed member needs a second table, keyed by XSD name
+
+A polymorphic member's candidates are all contracts, so resolving a name means finding a contract. A
+boxed member's may be a primitive announced by an XSD name with **no contract behind it**, so it needs
+the inverse of the writer's `BoxedPrimitives` table. Three things that table settles, and that the
+inverse has to preserve:
+
+- `"byte"` is `sbyte` and `"unsignedByte"` is `byte` - the pair most likely to be quietly "corrected"
+  into agreeing with the CLR names.
+- `char`, `Guid` and `TimeSpan` are named in the serialization namespace, because XML Schema has
+  nothing to call them.
+- A **bare `object`** carries neither `i:type` nor content, so there is nothing to recover but the
+  fact that something was there.
+
+What the declared type buys is a check. A member declared `ValueType` cannot hold a string, so an
+`i:type` naming one is refused with a `SerializationException` rather than surfacing later as an
+`InvalidCastException` out of generated code. `Enum` and `Array` members admit no primitive at all,
+so an unmatched name there never reaches the XSD table.
+
+`Array` is the one shape that is not a value: the only array the writer emits is `object[]`, and it
+announces no `i:type` at all - each item carries its own. Reading it is the same loop the untyped
+item reader serves for an `ArrayList`.
+
 ### What stays unreadable, and why
 
 A contract is readable only if every contract it reaches is - it is a graph question, computed with
@@ -345,7 +368,8 @@ terminates at run time on a nil or empty element rather than statically.
 
 | Not read | Reason |
 | --- | --- |
-| Boxed members - `object`, `ValueType`, `Enum`, `Array` | The candidates are not all contracts. A primitive in an `object` member is announced by an XSD name with no contract behind it, so resolving one needs a second table keyed by those names - the inverse of the `BoxedPrimitives` table the writer uses. |
+| Jagged collections | `int[][]` reads its items through the same path as any other collection, and that path has no case for an item that is itself a collection. |
+| `ArrayList` members | Its *items* read - they are untyped values like any other - but the container does not: the collection reader accumulates into a `List<T>` and assigns it or its `ToArray()`, and an `ArrayList` is neither. |
 | `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 

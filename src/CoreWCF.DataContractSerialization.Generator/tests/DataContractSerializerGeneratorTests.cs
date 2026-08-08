@@ -577,6 +577,71 @@ namespace App
         }
 
         [Fact]
+        public void ObjectMember_ReadsEachXsdNameBackToItsPrimitive()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public object Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // The swap survives the inverse. "byte" is sbyte and "unsignedByte" is byte, which is
+            // the pair most likely to be quietly "corrected" into agreeing with the CLR names.
+            Assert.Contains(
+                "if (name == \"byte\" && ns == \"http://www.w3.org/2001/XMLSchema\")",
+                result.SingleSource);
+            Assert.Contains(
+                "if (name == \"unsignedByte\" && ns == \"http://www.w3.org/2001/XMLSchema\")",
+                result.SingleSource);
+
+            // And the three that XML Schema has no name for stay in the serialization namespace.
+            Assert.Contains(
+                "if (name == \"char\" && ns == \"http://schemas.microsoft.com/2003/10/Serialization/\")",
+                result.SingleSource);
+            Assert.Contains(
+                "if (name == \"duration\" && ns == \"http://schemas.microsoft.com/2003/10/Serialization/\")",
+                result.SingleSource);
+
+            // A bare object carries neither i:type nor content, so there is nothing to recover but
+            // the fact that something was there.
+            Assert.Contains("return new object();", result.SingleSource);
+        }
+
+        [Fact]
+        public void ValueTypeMember_RejectsAPrimitiveItCannotHold()
+        {
+            // The declared type buys a check: a string named by an i:type here is refused with a
+            // SerializationException rather than surfacing as an InvalidCastException out of
+            // generated code.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.ValueType Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            Assert.Contains("if (!(__boxed is global::System.ValueType))", result.SingleSource);
+            Assert.Contains("which this member cannot hold.", result.SingleSource);
+        }
+
+        [Fact]
         public void PolymorphicMember_ReadsEachCandidateAndDefaultsToTheDeclaredContract()
         {
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"

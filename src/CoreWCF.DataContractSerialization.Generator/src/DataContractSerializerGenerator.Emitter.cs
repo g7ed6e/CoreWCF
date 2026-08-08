@@ -97,6 +97,7 @@ public sealed partial class DataContractSerializerGenerator
             EmitQNameHelper(indentor);
             EmitQNameReadHelper(indentor);
             EmitXsiTypeReadHelper(indentor);
+            EmitBoxedValueReadHelper(indentor);
             EmitDateOnlyHelpers(indentor);
             EmitReadHelpers(indentor);
             EmitAnyTypeHelper(indentor);
@@ -1600,6 +1601,80 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits the inverse of the <see cref="BoxedPrimitives"/> table: an <c>i:type</c> name back
+        /// to a value.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// This is what a boxed member needs that a polymorphic one does not. A polymorphic member's
+        /// candidates are all contracts, so resolving a name means finding a contract; a boxed
+        /// member's may be a primitive announced by an XSD name with no contract behind it, so it
+        /// needs this second table keyed by those names.
+        /// </para>
+        /// <para>
+        /// The bare object is the odd one: the writer emits neither i:type nor content for it, so
+        /// there is nothing to recover but the fact that something was there.
+        /// </para>
+        /// </remarks>
+        private void EmitBoxedValueReadHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static object ReadBoxedValue({DictionaryReader} reader, string name, string ns)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (name == null)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}// anyType: neither i:type nor content");
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}return new object();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+
+            bool first = true;
+            foreach ((string _, MemberKind kind, string xsiName, string xsiNamespace, bool _) in BoxedPrimitives)
+            {
+                string read = ElementValueExpression(kind)
+                    ?? ReadValueExpression(kind, "reader.ReadElementContentAsString()")!;
+
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} (name == {Literal(xsiName)} && ns == {Literal(xsiNamespace)})");
+                first = false;
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}return {read};");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}\"Element contains data from a type that maps to the name '\" + ns + \":\" + name +");
+            _builder.AppendLine($"{indentor}\"'. The deserializer has no knowledge of any type that maps to this name.\");");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}/// <summary>Reads one untyped item, the inverse of WriteAnyType.</summary>");
+            _builder.AppendLine($"{indentor}private static object ReadAnyType({DictionaryReader} reader)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}return null;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}ReadXsiType(reader, out string __itemName, out string __itemNamespace);");
+            _builder.AppendLine($"{indentor}return ReadBoxedValue(reader, __itemName, __itemNamespace);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>
         /// Emits the reader for the <c>i:type</c> attribute, which names the runtime contract.
         /// </summary>
         /// <remarks>
@@ -1964,7 +2039,171 @@ public sealed partial class DataContractSerializerGenerator
                 return;
             }
 
+            if (member.Kind == MemberKind.Object)
+            {
+                EmitBoxedMemberRead(indentor, member, target);
+                return;
+            }
+
             EmitValueRead(indentor, member.Kind, member.NestedContractFullyQualifiedName, target, "__text");
+        }
+
+        /// <summary>
+        /// Emits the read of a member declared as <c>object</c>, <c>ValueType</c>, <c>Enum</c> or
+        /// <c>Array</c>.
+        /// </summary>
+        /// <remarks>
+        /// The inverse of EmitObjectMember, and it has three tables to consult rather than one: the
+        /// known contracts, the known enums, and the XSD names of the primitives. What the declared
+        /// type buys is a check - a value the member cannot hold is rejected here rather than
+        /// surfacing later as an InvalidCastException from generated code.
+        /// </remarks>
+        private void EmitBoxedMemberRead(Indentor indentor, MemberSpec member, string target)
+        {
+            string declaredType = member.Boxed switch
+            {
+                BoxedDeclaration.ValueType => "global::System.ValueType",
+                BoxedDeclaration.Enum => "global::System.Enum",
+                BoxedDeclaration.Array => "global::System.Array",
+                _ => "object"
+            };
+
+            _builder.AppendLine($"{indentor}if (IsNil(reader))");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Skip();");
+            _builder.AppendLine($"{indentor}{target} = default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}ReadXsiType(reader, out string __typeName, out string __typeNamespace);");
+            _builder.AppendLine();
+
+            bool first = true;
+
+            if (member.Boxed == BoxedDeclaration.Array)
+            {
+                // The only array the writer emits is object[], and it announces no i:type at all -
+                // the items carry their own.
+                _builder.AppendLine($"{indentor}if (__typeName == null)");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitUntypedArrayRead(indentor, target);
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+                first = false;
+            }
+
+            foreach (string candidate in member.Candidates)
+            {
+                ContractSpec spec = _contractSpecs[candidate];
+
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} (__typeName == {Literal(spec.ContractName)}");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}&& __typeNamespace == {Literal(spec.ContractNamespace)})");
+                indentor.Decrement();
+                first = false;
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitTypedContractRead(indentor, spec, target);
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            foreach (string enumCandidate in member.EnumCandidates)
+            {
+                EnumSpec spec = _enumSpecs[enumCandidate];
+
+                _builder.AppendLine($"{indentor}{(first ? "if" : "else if")} (__typeName == {Literal(spec.ContractName)}");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}&& __typeNamespace == {Literal(spec.ContractNamespace)})");
+                indentor.Decrement();
+                first = false;
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}string __enumText = reader.ReadElementContentAsString();");
+                _builder.AppendLine($"{indentor}{target} = {ReadEnumExpression(enumCandidate, "__enumText")};");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            if (member.Boxed is BoxedDeclaration.Enum or BoxedDeclaration.Array)
+            {
+                // Neither admits a primitive, so an unmatched name is the end of the road rather
+                // than a reason to consult the XSD table.
+                _builder.AppendLine($"{indentor}{(first ? "if (true)" : "else")}");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}\"Element contains data from a type that maps to the name '\" + __typeNamespace + \":\" + __typeName +");
+                _builder.AppendLine($"{indentor}\"'. The deserializer has no knowledge of any type that maps to this name.\");");
+                indentor.Decrement();
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+            else
+            {
+                _builder.AppendLine($"{indentor}{(first ? "if (true)" : "else")}");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                _builder.AppendLine($"{indentor}object __boxed = ReadBoxedValue(reader, __typeName, __typeNamespace);");
+
+                if (declaredType != "object")
+                {
+                    _builder.AppendLine();
+                    _builder.AppendLine($"{indentor}if (!(__boxed is {declaredType}))");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                    _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(");
+                    indentor.Increment();
+                    _builder.AppendLine($"{indentor}\"Element contains data from a type that maps to the name '\" + __typeNamespace + \":\" + __typeName +");
+                    _builder.AppendLine($"{indentor}\"', which this member cannot hold.\");");
+                    indentor.Decrement();
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                    _builder.AppendLine();
+                }
+
+                _builder.AppendLine($"{indentor}{target} = ({declaredType})__boxed;");
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        /// <summary>Emits the read of an <c>object[]</c>, whose items each announce their own type.</summary>
+        private void EmitUntypedArrayRead(Indentor indentor, string target)
+        {
+            _builder.AppendLine($"{indentor}global::System.Collections.Generic.List<object> __items = new global::System.Collections.Generic.List<object>();");
+            _builder.AppendLine($"{indentor}if (reader.IsEmptyElement)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.Read();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine($"{indentor}else");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}reader.ReadStartElement();");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            _builder.AppendLine($"{indentor}while (reader.NodeType == global::System.Xml.XmlNodeType.Element)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}__items.Add(ReadAnyType(reader));");
+            _builder.AppendLine($"{indentor}reader.MoveToContent();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}reader.ReadEndElement();");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}{target} = __items.ToArray();");
         }
 
         /// <summary>
@@ -2036,6 +2275,10 @@ public sealed partial class DataContractSerializerGenerator
             MemberKind.ByteArray => "reader.ReadElementContentAsBase64()",
             MemberKind.DateTimeOffset => "ReadDateTimeOffset(reader)",
             MemberKind.QName => "ReadQName(reader)",
+
+            // An untyped item announces its own type and its own i:nil, so it consumes the whole
+            // element the way the other three do.
+            MemberKind.Object => "ReadAnyType(reader)",
             _ => null
         };
 
@@ -2507,10 +2750,29 @@ public sealed partial class DataContractSerializerGenerator
         /// <summary>Whether one member can be read back.</summary>
         private bool IsMemberReadable(MemberSpec member)
         {
-            // A boxed member is still write-only. Its candidates are not all contracts - a primitive
-            // in an object member is announced by an XSD name with no contract behind it - so
-            // resolving one needs a second table this slice does not build.
-            if (member.EnumCandidates.Count > 0 || member.Kind == MemberKind.Object)
+            if (member.Kind == MemberKind.Object)
+            {
+                foreach (string candidate in member.Candidates)
+                {
+                    if (!_contractSpecs.TryGetValue(candidate, out ContractSpec candidateSpec)
+                        || !IsReadable(candidateSpec))
+                    {
+                        return false;
+                    }
+                }
+
+                foreach (string enumCandidate in member.EnumCandidates)
+                {
+                    if (!_enumSpecs.ContainsKey(enumCandidate))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (member.EnumCandidates.Count > 0)
             {
                 return false;
             }
