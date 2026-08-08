@@ -789,6 +789,35 @@ namespace App
         }
 
         [Fact]
+        public void JaggedArrayMember_WrapsEachInnerArrayInAnArrayOfElement()
+        {
+            // Each outer item is an array in its own right, written as ArrayOf plus the XSD name of
+            // the innermost type, holding the items themselves. byte[][] is deliberately not this
+            // shape: byte[] is a primitive written as base64, so it stays a flat collection.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Jagged
+    {
+        [DataMember] public int[][] Numbers { get; set; }
+        [DataMember] public byte[][] Blobs { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Jagged))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteStartElement(\"ArrayOfint\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.Contains("foreach (var innerItem in item)", result.SingleSource);
+
+            // byte[][] keeps its flat base64 items, with no ArrayOf wrapper.
+            Assert.Contains("writer.WriteStartElement(\"base64Binary\", \"http://schemas.microsoft.com/2003/10/Serialization/Arrays\");", result.SingleSource);
+            Assert.DoesNotContain("ArrayOfbase64Binary", result.SingleSource);
+        }
+
+        [Fact]
         public void DictionaryMember_NamesEntriesAfterBothTypeArguments()
         {
             // An entry is named KeyValueOf followed by the XSD name of each argument, which is why
@@ -877,7 +906,7 @@ namespace App
     [DataContract]
     public class Awkward
     {
-        [DataMember] public int[][] Jagged { get; set; }
+        [DataMember] public System.Collections.Generic.List<Order> Orders { get; set; }
         [DataMember] public System.Collections.Generic.Dictionary<string, Order> Map { get; set; }
         [DataMember] private int _hidden;
     }
@@ -889,7 +918,7 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Contains("member 'Jagged' has unsupported collection element type", result.SingleSource);
+            Assert.Contains("member 'Orders' has unsupported collection element type", result.SingleSource);
             Assert.Contains("member 'Map' has unsupported key or value type", result.SingleSource);
             Assert.Contains("member '_hidden' is not public", result.SingleSource);
         }

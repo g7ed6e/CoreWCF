@@ -103,6 +103,21 @@ public sealed partial class DataContractSerializerGenerator
         /// </summary>
         public string? ElementEnumFullyQualifiedName { get; init; }
 
+        /// <summary>
+        /// For a jagged collection, the element name each innermost item gets.
+        /// </summary>
+        /// <remarks>
+        /// The outer items are named <c>ArrayOf</c> plus this, which is how int[][] writes
+        /// ArrayOfint entries each holding int elements.
+        /// </remarks>
+        public string? NestedItemName { get; init; }
+
+        /// <summary>For a jagged collection, how each innermost item is written.</summary>
+        public MemberKind NestedElementKind { get; init; }
+
+        /// <summary>For a jagged collection, whether an innermost item may be null.</summary>
+        public bool NestedElementCanBeNull { get; init; }
+
         /// <summary>For <see cref="MemberKind.Dictionary"/>, how the key is written.</summary>
         public MemberKind KeyKind { get; init; }
 

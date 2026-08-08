@@ -551,6 +551,9 @@ public sealed partial class DataContractSerializerGenerator
                 string? itemNamespace = null;
                 bool elementCanBeNull = false;
                 INamedTypeSymbol? elementEnum = null;
+                string? nestedItemName = null;
+                MemberKind nestedElementKind = MemberKind.Unsupported;
+                bool nestedElementCanBeNull = false;
                 MemberKind keyKind = MemberKind.Unsupported;
                 MemberKind valueKind = MemberKind.Unsupported;
                 bool keyCanBeNull = false;
@@ -559,7 +562,8 @@ public sealed partial class DataContractSerializerGenerator
                 if (kind == MemberKind.Collection)
                 {
                     elementKind = ClassifyCollectionElement(
-                        memberType, contractNamespace, out itemName, out itemNamespace, out elementEnum, out elementCanBeNull);
+                        memberType, contractNamespace, out itemName, out itemNamespace, out elementEnum, out elementCanBeNull,
+                        out nestedItemName, out nestedElementKind, out nestedElementCanBeNull);
 
                     if (elementKind == MemberKind.Unsupported)
                     {
@@ -617,6 +621,9 @@ public sealed partial class DataContractSerializerGenerator
                     ItemName = itemName,
                     ItemNamespace = itemNamespace,
                     ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
+                    NestedItemName = nestedItemName,
+                    NestedElementKind = nestedElementKind,
+                    NestedElementCanBeNull = nestedElementCanBeNull,
                     KeyKind = keyKind,
                     ValueKind = valueKind,
                     KeyCanBeNull = keyCanBeNull,
@@ -686,12 +693,18 @@ public sealed partial class DataContractSerializerGenerator
             out string? itemName,
             out string? itemNamespace,
             out INamedTypeSymbol? elementEnum,
-            out bool canBeNull)
+            out bool canBeNull,
+            out string? nestedItemName,
+            out MemberKind nestedElementKind,
+            out bool nestedElementCanBeNull)
         {
             itemName = null;
             itemNamespace = CollectionNamespace;
             elementEnum = null;
             canBeNull = false;
+            nestedItemName = null;
+            nestedElementKind = MemberKind.Unsupported;
+            nestedElementCanBeNull = false;
 
             if (IsArrayList(collectionType))
             {
@@ -707,6 +720,31 @@ public sealed partial class DataContractSerializerGenerator
             if (element is null)
             {
                 return MemberKind.Unsupported;
+            }
+
+            // A jagged collection: each outer item is itself an array, written as an ArrayOf element
+            // holding the innermost items. byte[] does not qualify - CollectionElementTypeOf
+            // deliberately declines it, so byte[][] stays a collection of base64 primitives.
+            if (CollectionElementTypeOf(element) is ITypeSymbol innerElement)
+            {
+                MemberKind innerKind = ClassifyMember(innerElement, out bool innerIsNullable, out INamedTypeSymbol? _);
+                string? innerName = innerIsNullable ? null : XsdNameOf(innerKind);
+                if (innerName is null)
+                {
+                    return MemberKind.Unsupported;
+                }
+
+                nestedItemName = innerName;
+                nestedElementKind = innerKind;
+                nestedElementCanBeNull = innerKind is MemberKind.String or MemberKind.ByteArray or MemberKind.Uri;
+
+                itemName = "ArrayOf" + innerName;
+                itemNamespace = CollectionNamespace;
+
+                // The outer item is an array, so a null one is written as i:nil like any other
+                // missing reference.
+                canBeNull = true;
+                return MemberKind.Collection;
             }
 
             MemberKind kind = ClassifyMember(element, out bool elementIsNullable, out INamedTypeSymbol? elementContract);

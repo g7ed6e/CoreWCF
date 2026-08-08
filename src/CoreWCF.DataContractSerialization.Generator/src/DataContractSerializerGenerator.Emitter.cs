@@ -527,6 +527,40 @@ public sealed partial class DataContractSerializerGenerator
                     // An ArrayList item announces its own runtime type, and writes its own i:nil.
                     _builder.AppendLine($"{indentor}WriteAnyType(writer, item);");
                 }
+                else if (member.ElementKind == MemberKind.Collection)
+                {
+                    // A jagged item is an array in its own right: the ArrayOf element is already
+                    // open, and its children are the innermost items, in the same namespace.
+                    _builder.AppendLine($"{indentor}foreach (var innerItem in item)");
+                    _builder.AppendLine($"{indentor}{{");
+                    indentor.Increment();
+                    _builder.AppendLine($"{indentor}writer.WriteStartElement({Literal(member.NestedItemName!)}, {Literal(member.ItemNamespace ?? CollectionNamespace)});");
+
+                    if (member.NestedElementCanBeNull)
+                    {
+                        _builder.AppendLine($"{indentor}if (innerItem == null)");
+                        _builder.AppendLine($"{indentor}{{");
+                        indentor.Increment();
+                        _builder.AppendLine($"{indentor}WriteNil(writer);");
+                        indentor.Decrement();
+                        _builder.AppendLine($"{indentor}}}");
+                        _builder.AppendLine($"{indentor}else");
+                        _builder.AppendLine($"{indentor}{{");
+                        indentor.Increment();
+                    }
+
+                    _builder.AppendLine($"{indentor}{WriteValueStatement(member.NestedElementKind, "innerItem")}");
+
+                    if (member.NestedElementCanBeNull)
+                    {
+                        indentor.Decrement();
+                        _builder.AppendLine($"{indentor}}}");
+                    }
+
+                    _builder.AppendLine($"{indentor}writer.WriteEndElement();");
+                    indentor.Decrement();
+                    _builder.AppendLine($"{indentor}}}");
+                }
                 else
                 {
                     _builder.AppendLine($"{indentor}{WriteValueStatement(member.ElementKind, "item")}");

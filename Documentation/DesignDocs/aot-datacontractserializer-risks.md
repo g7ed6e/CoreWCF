@@ -19,8 +19,8 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | --- | --- |
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
-| **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, and `Dictionary`/`ArrayList`. **71 of 78** corpus cases byte-match; the rest report unsupported and skip. |
-| **M4+ — deferred** | Jagged arrays, `DateOnly`/`TimeOnly`, implicit (no-attribute) contracts, `[KnownType]` naming a method, non-public data members, `ISerializable`, `ReadObject`, and the seam gaps below. |
+| **M3 — capability by capability** | In progress. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, and jagged arrays. **72 of 78** corpus cases byte-match; the rest report unsupported and skip. |
+| **M4+ — deferred** | `DateOnly`/`TimeOnly`, implicit (no-attribute) contracts, `[KnownType]` naming a method, non-public data members, `ISerializable`, `ReadObject`, and the seam gaps below. Of the six cases still skipping, only `DateOnly`/`TimeOnly` is a capability; the other five are deliberate v1 exclusions or things a generator cannot reach. |
 
 ## What the switch does
 
