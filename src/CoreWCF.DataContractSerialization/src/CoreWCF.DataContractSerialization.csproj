@@ -10,7 +10,12 @@
     <IncludeCommonCode>false</IncludeCommonCode>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="$(SourceDir)CoreWCF.Primitives\src\CoreWCF.Primitives.csproj" />
     <ProjectReference Include="$(SourceDir)CoreWCF.DataContractSerialization.Generator\src\CoreWCF.DataContractSerialization.Generator.csproj" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="CoreWCF.DataContractSerialization.props" Link="PackageFiles/CoreWCF.DataContractSerialization.props" />
+    <None Include="CoreWCF.DataContractSerialization.targets" Link="PackageFiles/CoreWCF.DataContractSerialization.targets" />
   </ItemGroup>
   <ItemGroup>
     <!-- Ship the source generator inside this package as an analyzer, mirroring how
@@ -18,6 +23,18 @@
     <Content Include="$(OutputPath)\CoreWCF.DataContractSerialization.Generator.dll">
       <Pack>true</Pack>
       <PackagePath>analyzers/dotnet/roslyn4.8/cs</PackagePath>
+      <Visible>false</Visible>
+    </Content>
+    <!-- Named after the package id so NuGet imports them automatically in consuming projects.
+         They default the generator on per target framework - see the targets file. -->
+    <Content Include="CoreWCF.DataContractSerialization.props">
+      <Pack>true</Pack>
+      <PackagePath>build;buildTransitive</PackagePath>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="CoreWCF.DataContractSerialization.targets">
+      <Pack>true</Pack>
+      <PackagePath>build;buildTransitive</PackagePath>
       <Visible>false</Visible>
     </Content>
   </ItemGroup>

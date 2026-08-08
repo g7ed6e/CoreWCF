@@ -30,6 +30,34 @@
     <ProjectReference Include="../src/CoreWCF.DataContractSerialization.csproj" />
     <ProjectReference Include="$(SourceDir)CoreWCF.DataContractSerialization.TestCorpus\src\CoreWCF.DataContractSerialization.TestCorpus.csproj" />
     <ProjectReference Include="$(SourceDir)CoreWCF.Primitives\src\CoreWCF.Primitives.csproj" />
+    <!-- The generator runs on this project rather than on the corpus. Generated code that failed to
+         compile would otherwise break the corpus build, taking the reflection oracle down with it -
+         and the oracle is what proves the generator wrong. Everything in the first slice has public
+         members, so cross-assembly access is not yet a constraint. -->
+    <ProjectReference Include="$(SourceDir)CoreWCF.DataContractSerialization.Generator\src\CoreWCF.DataContractSerialization.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- Mirrors the gate in CoreWCF.DataContractSerialization.targets, which a package consumer gets
+       automatically. That file cannot simply be imported here: NuGet injects it after the SDK
+       targets, where TargetFrameworkIdentifier is populated, whereas an import in the project body
+       is evaluated before that and would silently see an empty value and disable the generator.
+       Conditioned on TargetFramework, which is set this early. -->
+  <PropertyGroup Condition="'$(EnableCoreWCFDataContractSerializerGenerator)'=='' AND !$(TargetFramework.StartsWith('net4')) AND !$(TargetFramework.StartsWith('netstandard'))">
+    <EnableCoreWCFDataContractSerializerGenerator>true</EnableCoreWCFDataContractSerializerGenerator>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(EnableCoreWCFDataContractSerializerGenerator)'==''">
+    <EnableCoreWCFDataContractSerializerGenerator>false</EnableCoreWCFDataContractSerializerGenerator>
+  </PropertyGroup>
+  <ItemGroup>
+    <CompilerVisibleProperty Include="EnableCoreWCFDataContractSerializerGenerator" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Inspecting generated code with EmitCompilerGeneratedFiles writes it under the project, where
+         the default glob would compile it as ordinary source - so the next build sees every
+         generated member declared twice. Exclude it so that inspection stays a read-only act. -->
+    <Compile Remove="generated/**" />
+    <None Remove="generated/**" />
   </ItemGroup>
 
   <ItemGroup>

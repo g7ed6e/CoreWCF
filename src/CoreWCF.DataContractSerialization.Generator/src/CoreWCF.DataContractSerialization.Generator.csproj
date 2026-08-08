@@ -11,5 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="4.8.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+    <!-- Records use init-only setters, which netstandard2.0 lacks the marker type for. -->
+    <PackageReference Include="IsExternalInit" PrivateAssets="all" />
   </ItemGroup>
 </Project>
