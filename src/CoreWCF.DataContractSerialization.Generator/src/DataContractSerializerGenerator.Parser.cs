@@ -61,6 +61,7 @@ public sealed partial class DataContractSerializerGenerator
             // the explicitly declared ones become GetSerializer entries; the rest exist so their
             // content can be written inline by whatever refers to them.
             Dictionary<string, ContractSpec> contracts = new(StringComparer.Ordinal);
+            Dictionary<string, EnumSpec> enumSpecs = new(StringComparer.Ordinal);
             Queue<(INamedTypeSymbol Type, bool IsRoot)> pending = new();
             HashSet<string> queued = new(StringComparer.Ordinal);
 
@@ -89,7 +90,7 @@ public sealed partial class DataContractSerializerGenerator
                 cancellationToken.ThrowIfCancellationRequested();
 
                 (INamedTypeSymbol type, bool isRoot) = pending.Dequeue();
-                ContractSpec spec = ParseContract(type, contextType.ContainingAssembly, isRoot, out List<INamedTypeSymbol> referenced, cancellationToken);
+                ContractSpec spec = ParseContract(type, contextType.ContainingAssembly, isRoot, out List<INamedTypeSymbol> referenced, out List<INamedTypeSymbol> referencedEnums, cancellationToken);
                 contracts[spec.FullyQualifiedName] = spec;
 
                 // Symbols are followed here and never stored: putting one in the spec would root a
@@ -97,6 +98,15 @@ public sealed partial class DataContractSerializerGenerator
                 foreach (INamedTypeSymbol reference in referenced)
                 {
                     Enqueue(reference, isRoot: false);
+                }
+
+                foreach (INamedTypeSymbol enumType in referencedEnums)
+                {
+                    string enumKey = enumType.ToDisplayString(FullyQualifiedFormat);
+                    if (!enumSpecs.ContainsKey(enumKey))
+                    {
+                        enumSpecs[enumKey] = ParseEnum(enumType, enumKey);
+                    }
                 }
             }
 
@@ -113,11 +123,16 @@ public sealed partial class DataContractSerializerGenerator
                 .OrderBy(c => c.FullyQualifiedName, StringComparer.Ordinal)
                 .ToArray();
 
+            EnumSpec[] orderedEnums = enumSpecs.Values
+                .OrderBy(e => e.FullyQualifiedName, StringComparer.Ordinal)
+                .ToArray();
+
             return new ContextSpec(
                 containingNamespace,
                 contextType.Name,
                 HintNameFor(contextType),
                 new EquatableArray<ContractSpec>(ordered),
+                new EquatableArray<EnumSpec>(orderedEnums),
                 new EquatableArray<DiagnosticInfo>(diagnostics.ToArray()));
 
             void Enqueue(INamedTypeSymbol type, bool isRoot)
@@ -197,9 +212,10 @@ public sealed partial class DataContractSerializerGenerator
             return null;
         }
 
-        private static ContractSpec ParseContract(INamedTypeSymbol contractType, IAssemblySymbol contextAssembly, bool isRoot, out List<INamedTypeSymbol> referenced, CancellationToken cancellationToken)
+        private static ContractSpec ParseContract(INamedTypeSymbol contractType, IAssemblySymbol contextAssembly, bool isRoot, out List<INamedTypeSymbol> referenced, out List<INamedTypeSymbol> enums, CancellationToken cancellationToken)
         {
             referenced = new List<INamedTypeSymbol>();
+            enums = new List<INamedTypeSymbol>();
             AttributeData dataContract = GetAttribute(contractType, DataContractAttributeName)!;
 
             string contractName = GetNamedArgument(dataContract, "Name") ?? contractType.Name;
@@ -292,9 +308,13 @@ public sealed partial class DataContractSerializerGenerator
                                           memberType.ToDisplayString() + "'";
                 }
 
-                if (nestedContract is not null)
+                if (nestedContract is not null && kind == MemberKind.Contract)
                 {
                     referenced.Add(nestedContract);
+                }
+                else if (nestedContract is not null && kind == MemberKind.Enum)
+                {
+                    enums.Add(nestedContract);
                 }
 
                 members.Add(new MemberSpec(
@@ -327,6 +347,72 @@ public sealed partial class DataContractSerializerGenerator
                 baseContract?.ToDisplayString(FullyQualifiedFormat),
                 isRoot);
         }
+
+        /// <summary>
+        /// Builds the value-to-wire-name table for an enum, in declaration order.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors EnumDataContract.ImportDataMembers: when the enum carries [DataContract] only
+        /// fields with [EnumMember] participate, and an explicitly set Value replaces the field
+        /// name; otherwise every public constant participates under its own name. Declaration order
+        /// is preserved because the flags decomposition consumes members in that order.
+        /// </remarks>
+        private static EnumSpec ParseEnum(INamedTypeSymbol enumType, string fullyQualifiedName)
+        {
+            bool hasDataContract = GetAttribute(enumType, DataContractAttributeName) is not null;
+            bool isUnsignedLong = enumType.EnumUnderlyingType?.SpecialType == SpecialType.System_UInt64;
+            bool isFlags = enumType.GetAttributes()
+                .Any(a => a.AttributeClass?.ToDisplayString() == "System.FlagsAttribute");
+
+            List<EnumMemberSpec> members = new();
+            foreach (ISymbol member in enumType.GetMembers())
+            {
+                if (member is not IFieldSymbol { IsConst: true, HasConstantValue: true } field)
+                {
+                    continue;
+                }
+
+                string name = field.Name;
+                if (hasDataContract)
+                {
+                    AttributeData? enumMember = field.GetAttributes()
+                        .FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == "System.Runtime.Serialization.EnumMemberAttribute");
+                    if (enumMember is null)
+                    {
+                        continue;
+                    }
+
+                    if (GetNamedArgument(enumMember, "Value") is string explicitValue && explicitValue.Length > 0)
+                    {
+                        name = explicitValue;
+                    }
+                }
+
+                members.Add(new EnumMemberSpec(name, ToInt64(field.ConstantValue, isUnsignedLong)));
+            }
+
+            return new EnumSpec(fullyQualifiedName, isFlags, isUnsignedLong, new EquatableArray<EnumMemberSpec>(members.ToArray()));
+        }
+
+        /// <summary>
+        /// Normalises an enum constant to the long the write algorithm compares against, matching
+        /// EnumDataContract's use of Convert.ToUInt64 for ulong-backed enums and Convert.ToInt64
+        /// otherwise.
+        /// </summary>
+        private static long ToInt64(object? constant, bool isUnsignedLong) => constant switch
+        {
+            null => 0L,
+            ulong value when isUnsignedLong => unchecked((long)value),
+            ulong value => unchecked((long)value),
+            long value => value,
+            uint value => value,
+            int value => value,
+            ushort value => value,
+            short value => value,
+            byte value => value,
+            sbyte value => value,
+            _ => 0L
+        };
 
         /// <summary>
         /// Whether this member overrides one that is already a data member of a base contract.
@@ -490,6 +576,12 @@ public sealed partial class DataContractSerializerGenerator
                     return MemberKind.Guid;
                 case "System.TimeSpan":
                     return MemberKind.TimeSpan;
+            }
+
+            if (type.TypeKind == TypeKind.Enum && type is INamedTypeSymbol enumType)
+            {
+                nestedContract = enumType;
+                return MemberKind.Enum;
             }
 
             // A member that is itself a data contract is written inline by that contract's content

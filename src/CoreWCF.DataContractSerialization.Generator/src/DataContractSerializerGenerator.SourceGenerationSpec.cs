@@ -22,13 +22,14 @@ public sealed partial class DataContractSerializerGenerator
         string Name,
         string HintName,
         EquatableArray<ContractSpec> Contracts,
+        EquatableArray<EnumSpec> Enums,
         EquatableArray<DiagnosticInfo> Diagnostics) : IEquatable<ContextSpec>
     {
         /// <summary>True when the parser found a fatal problem and nothing should be emitted.</summary>
         public bool IsSuppressed { get; init; }
 
         public static ContextSpec Failed(EquatableArray<DiagnosticInfo> diagnostics) =>
-            new(null, string.Empty, string.Empty, EquatableArray<ContractSpec>.Empty, diagnostics)
+            new(null, string.Empty, string.Empty, EquatableArray<ContractSpec>.Empty, EquatableArray<EnumSpec>.Empty, diagnostics)
             {
                 IsSuppressed = true
             };

@@ -38,6 +38,8 @@ public sealed partial class DataContractSerializerGenerator
 
         private readonly StringBuilder _builder = new();
         private readonly Dictionary<string, int> _contractIndexes = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _enumIndexes = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, EnumSpec> _enumSpecs = new(StringComparer.Ordinal);
 
         internal SourceText Emit(ContextSpec context)
         {
@@ -69,8 +71,26 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}{{");
             indentor.Increment();
 
+            int enumIndex = 0;
+            foreach (EnumSpec enumSpec in context.Enums)
+            {
+                _enumIndexes[enumSpec.FullyQualifiedName] = enumIndex++;
+                _enumSpecs[enumSpec.FullyQualifiedName] = enumSpec;
+            }
+
             EmitGetSerializer(indentor, context);
             EmitNilHelper(indentor);
+
+            if (context.Enums.Count > 0)
+            {
+                EmitEnumHelper(indentor);
+
+                foreach (EnumSpec enumSpec in context.Enums)
+                {
+                    _builder.AppendLine();
+                    EmitEnumTable(indentor, enumSpec);
+                }
+            }
 
             foreach (ContractSpec contract in context.Contracts)
             {
@@ -333,6 +353,15 @@ public sealed partial class DataContractSerializerGenerator
             {
                 _builder.AppendLine($"{indentor}{ContentWriterName(member.NestedContractFullyQualifiedName!)}(writer, {value});");
             }
+            else if (member.Kind == MemberKind.Enum)
+            {
+                int index = _enumIndexes[member.NestedContractFullyQualifiedName!];
+                EnumSpec spec = _enumSpecs[member.NestedContractFullyQualifiedName!];
+                string cast = spec.IsUnsignedLong ? $"unchecked((long)(ulong){value})" : $"(long){value}";
+                string isFlags = spec.IsFlags ? "true" : "false";
+
+                _builder.AppendLine($"{indentor}WriteEnum(writer, {cast}, __EnumValues{index}, __EnumNames{index}, {isFlags}, {Literal(member.NestedContractFullyQualifiedName!)});");
+            }
             else
             {
                 _builder.AppendLine($"{indentor}{WriteValueStatement(member.Kind, value)}");
@@ -381,6 +410,96 @@ public sealed partial class DataContractSerializerGenerator
                 MemberKind.Boolean => $"!{access}",
                 _ => $"{access} == default"
             };
+        }
+
+        /// <summary>
+        /// Emits the shared enum writer: one copy of the algorithm, driven by a per-enum table.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors EnumDataContract.WriteEnumValue. An exact value match wins even for a flags enum,
+        /// which is why the combined value is looked up before any decomposition. A flags value that
+        /// cannot be fully decomposed is an error rather than a partial write, and a zero that
+        /// matched nothing falls back to the member declared as zero, if there is one.
+        /// </remarks>
+        private void EmitEnumHelper(Indentor indentor)
+        {
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static void WriteEnum({DictionaryWriter} writer, long longValue, long[] values, string[] names, bool isFlags, string typeName)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}for (int i = 0; i < values.Length; i++)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (longValue == values[i])");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteString(names[i]);");
+            _builder.AppendLine($"{indentor}return;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (isFlags)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}int zeroIndex = -1;");
+            _builder.AppendLine($"{indentor}bool noneWritten = true;");
+            _builder.AppendLine($"{indentor}for (int i = 0; i < values.Length; i++)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}long current = values[i];");
+            _builder.AppendLine($"{indentor}if (current == 0) {{ zeroIndex = i; continue; }}");
+            _builder.AppendLine($"{indentor}if (longValue == 0) {{ break; }}");
+            _builder.AppendLine($"{indentor}if ((current & longValue) == current)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (noneWritten) {{ noneWritten = false; }} else {{ writer.WriteString(\" \"); }}");
+            _builder.AppendLine($"{indentor}writer.WriteString(names[i]);");
+            _builder.AppendLine($"{indentor}longValue &= ~current;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (longValue != 0)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(\"Invalid enum value on write for \" + typeName + \".\");");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}if (noneWritten && zeroIndex >= 0)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}writer.WriteString(names[zeroIndex]);");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}throw new global::System.Runtime.Serialization.SerializationException(\"Invalid enum value on write for \" + typeName + \".\");");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+        }
+
+        private void EmitEnumTable(Indentor indentor, EnumSpec enumSpec)
+        {
+            int index = _enumIndexes[enumSpec.FullyQualifiedName];
+
+            List<string> values = new();
+            List<string> names = new();
+            foreach (EnumMemberSpec member in enumSpec.Members)
+            {
+                values.Add(member.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "L");
+                names.Add(Literal(member.Name));
+            }
+
+            _builder.AppendLine($"{indentor}// {enumSpec.FullyQualifiedName}");
+            _builder.AppendLine($"{indentor}private static readonly long[] __EnumValues{index} = new long[] {{ {string.Join(", ", values)} }};");
+            _builder.AppendLine($"{indentor}private static readonly string[] __EnumNames{index} = new string[] {{ {string.Join(", ", names)} }};");
         }
 
         private void EmitNilHelper(Indentor indentor)

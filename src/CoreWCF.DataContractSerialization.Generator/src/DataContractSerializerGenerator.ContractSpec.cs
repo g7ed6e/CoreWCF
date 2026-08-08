@@ -52,6 +52,22 @@ public sealed partial class DataContractSerializerGenerator
         string? ChildNamespaceToDeclare) : IEquatable<MemberSpec>;
 
     /// <summary>
+    /// An enum reachable from a contract, reduced to the value-to-wire-name table needed to write it.
+    /// </summary>
+    /// <remarks>
+    /// Members are in declaration order, which the flags decomposition depends on. When the enum
+    /// itself carries <c>[DataContract]</c> only fields with <c>[EnumMember]</c> participate;
+    /// otherwise every public static field does. See EnumDataContract.ImportDataMembers.
+    /// </remarks>
+    internal sealed record EnumSpec(
+        string FullyQualifiedName,
+        bool IsFlags,
+        bool IsUnsignedLong,
+        EquatableArray<EnumMemberSpec> Members) : IEquatable<EnumSpec>;
+
+    internal sealed record EnumMemberSpec(string Name, long Value) : IEquatable<EnumMemberSpec>;
+
+    /// <summary>
     /// How a member's value is written. Mirrors the primitive cases XmlWriterDelegator handles in
     /// dotnet/runtime, plus <see cref="Contract"/> for a member that is itself a data contract;
     /// anything not listed here makes its contract unsupported for now.
@@ -77,6 +93,7 @@ public sealed partial class DataContractSerializerGenerator
         DateTime,
         TimeSpan,
         ByteArray,
-        Contract
+        Contract,
+        Enum
     }
 }
