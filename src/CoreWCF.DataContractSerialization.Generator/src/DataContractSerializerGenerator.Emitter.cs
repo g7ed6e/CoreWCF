@@ -1735,6 +1735,51 @@ public sealed partial class DataContractSerializerGenerator
             _builder.AppendLine($"{indentor}}}");
             indentor.Decrement();
             _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static global::System.DateOnly ReadDateOnly(string text)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            // Not a fallback: before .NET 10 the serializer does not know what a DateOnly is and
+            // writes a contract with no members, so the recorded element genuinely carries no value.
+            // Returning default is what the document says, and it is also what the reflection-based
+            // reader produces from the same bytes - which is what keeps the round-trip exact.
+            _builder.AppendLine($"{indentor}if (!{DateOnlyIsPrimitive})");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}return global::System.DateOnly.ParseExact(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}text,");
+            _builder.AppendLine($"{indentor}\"yyyy-MM-dd\",");
+            _builder.AppendLine($"{indentor}global::System.Globalization.DateTimeFormatInfo.InvariantInfo,");
+            _builder.AppendLine($"{indentor}global::System.Globalization.DateTimeStyles.AllowLeadingWhite | global::System.Globalization.DateTimeStyles.AllowTrailingWhite);");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            _builder.AppendLine($"{indentor}private static global::System.TimeOnly ReadTimeOnly(string text)");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}if (!{DateOnlyIsPrimitive})");
+            _builder.AppendLine($"{indentor}{{");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}return default;");
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
+            _builder.AppendLine();
+            // Deliberately not TimeOnly.ParseExact. XmlReaderDelegator.ReadElementContentAsTimeOnly
+            // goes through XmlConvert.ToDateTimeOffset, which accepts a Z or an offset that
+            // "HH:mm:ss.FFFFFFF" would reject. The ParseTimeOnly helper sitting next to it upstream
+            // is never called, and copying it instead would narrow what this reader accepts.
+            _builder.AppendLine($"{indentor}return global::System.TimeOnly.FromTimeSpan(");
+            indentor.Increment();
+            _builder.AppendLine($"{indentor}{XmlConvert}.ToDateTimeOffset(text).TimeOfDay);");
+            indentor.Decrement();
+            indentor.Decrement();
+            _builder.AppendLine($"{indentor}}}");
         }
 
         /// <summary>
@@ -2337,6 +2382,11 @@ public sealed partial class DataContractSerializerGenerator
             MemberKind.DateTime =>
                 $"{XmlConvert}.ToDateTime({text}, global::System.Xml.XmlDateTimeSerializationMode.RoundtripKind)",
             MemberKind.Uri => $"new global::System.Uri({text}, global::System.UriKind.RelativeOrAbsolute)",
+
+            // Both decide their format at run time rather than at compile time, so the helper is
+            // where the branch lives - see EmitDateOnlyHelpers.
+            MemberKind.DateOnly => $"ReadDateOnly({text})",
+            MemberKind.TimeOnly => $"ReadTimeOnly({text})",
             _ => null
         };
 

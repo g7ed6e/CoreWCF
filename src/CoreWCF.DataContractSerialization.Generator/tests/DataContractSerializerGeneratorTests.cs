@@ -375,6 +375,40 @@ namespace App
         }
 
         [Fact]
+        public void DateOnlyAndTimeOnlyMembers_ReadTheFormatTheRuntimeWrote()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Holder
+    {
+        [DataMember] public System.DateOnly Day { get; set; }
+        [DataMember] public System.TimeOnly Moment { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Holder))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+
+            // The same run-time test the writer uses, because the format is a property of the
+            // runtime rather than of the contract: before .NET 10 the serializer writes a contract
+            // with no members, so the element carries no value and default is what the document
+            // says.
+            Assert.Contains("if (!__DateOnlyIsPrimitive)", result.SingleSource);
+            Assert.Contains("global::System.DateOnly.ParseExact(", result.SingleSource);
+
+            // Deliberately not TimeOnly.ParseExact. ReadElementContentAsTimeOnly goes through
+            // XmlConvert.ToDateTimeOffset, which accepts a Z or an offset that "HH:mm:ss.FFFFFFF"
+            // would reject; the ParseTimeOnly helper next to it upstream is never called.
+            Assert.Contains("global::System.TimeOnly.FromTimeSpan(", result.SingleSource);
+            Assert.Contains("ToDateTimeOffset(text).TimeOfDay", result.SingleSource);
+            Assert.DoesNotContain("global::System.TimeOnly.ParseExact(", result.SingleSource);
+        }
+
+        [Fact]
         public void DateTimeOffsetMember_ReadsBackThroughTheAdapterContract()
         {
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"

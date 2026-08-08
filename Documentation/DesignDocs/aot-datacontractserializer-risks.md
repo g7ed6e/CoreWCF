@@ -20,7 +20,7 @@ It is an **optimization with a fallback**, not a replacement. The generated path
 | **M1 — the oracle** | Done (`55e77dfe3`, `5f7757409`). 75 corpus cases whose exact serialized bytes are recorded from the real serializer, a golden-record harness where adding a second serializer is one subclass, and the package/generator/corpus skeleton. |
 | **M2 — first generator slice** | Done. `WriteObject` over flat contracts, behind the switch, gated to net8.0+. 3 of 75 corpus cases byte-match; the rest report unsupported and skip. |
 | **M3 — capability by capability** | Done for the corpus. Nested contract members and inheritance, enums, arrays and `List<T>` of primitives, `IsReference`, `[KnownType]`/`i:type`, `object` members, `[Serializable]`, `Uri`, `DateTimeOffset`, `XmlQualifiedName`, members declared as `ValueType`/`Enum`/`Array`, `Dictionary`/`ArrayList`, jagged arrays, and `DateOnly`/`TimeOnly`. **77 of 82** corpus cases byte-match; the five that skip are all deliberate exclusions. |
-| **M4 — `ReadObject`** | In progress. **39 of 82** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset` and `XmlQualifiedName`. See "The read algorithm" below for what stays unreadable and why. |
+| **M4 — `ReadObject`** | In progress. **41 of 82** corpus cases read back through generated code and reproduce their fixture when written out again by the reflection serializer. Everything except object identity and polymorphism: flat contracts of built-in members, nested contracts, collections, inheritance, enums, dictionaries, `DateTimeOffset`, `XmlQualifiedName`, `DateOnly` and `TimeOnly`. See "The read algorithm" below for what stays unreadable and why. |
 | **M5+ — deferred** | The seam gaps below. Every case still skipping is a deliberate v1 exclusion or something a generator cannot reach: three contracts whose `[KnownType]` names a method resolved at run time, one with a non-public data member, one with no `[DataContract]` at all. `WriteObject` is feature-complete for the corpus. |
 
 ## What the switch does
@@ -271,6 +271,37 @@ The generator had been applying the prefix unconditionally. `AllTypes` never cau
 fixtures. Nothing about this is visible to a semantic XML diff, which is why the harness compares
 bytes.
 
+### `DateOnly` and `TimeOnly` are read by whichever rule the runtime wrote them under
+
+The one format decided by the runtime rather than by the contract, so the reader carries the same
+`Environment.Version.Major >= 10` test the writer does.
+
+Before .NET 10 the serializer does not know what these types are and writes a contract with no
+members - an empty element that drops the value. Reading `default` there is not a fallback: it is
+what the recorded document says, and it is what the reflection-based reader produces from the same
+bytes, which is what keeps the round-trip exact. On .NET 10 they are primitives and the text is
+parsed.
+
+Upstream is worth following closely here, because the two are not symmetric:
+
+```csharp
+// ReadElementContentAsDateOnly
+return DateOnly.ParseExact(s, "yyyy-MM-dd", DateTimeFormatInfo.InvariantInfo,
+    DateTimeStyles.AllowLeadingWhite | DateTimeStyles.AllowTrailingWhite);
+
+// ReadElementContentAsTimeOnly
+var dto = XmlConvert.ToDateTimeOffset(s);
+return TimeOnly.FromTimeSpan(dto.TimeOfDay);
+```
+
+`XmlReaderDelegator` also defines a `ParseTimeOnly` that mirrors the DateOnly one - and never calls
+it. Copying that helper instead of the code actually on the path would have narrowed what the reader
+accepts, rejecting a `Z` or an offset the real one takes.
+
+Because the branch is a run-time test rather than a compile-time one, **one test verifies both
+halves**: `SanityDateAndTimeOnly` round-trips on net8.0 and net9.0 against the lost-value fixture and
+on net10.0 against the primitive one.
+
 ### What stays unreadable, and why
 
 A contract is readable only if every contract it reaches is - it is a graph question, computed with
@@ -282,7 +313,6 @@ terminates at run time on a nil or empty element rather than statically.
 | Polymorphic members, boxed members | Resolving an `i:type` back to a type is a different problem from announcing one. A member that may hold more than its declared contract would otherwise read as its declared type and silently lose the derived members. |
 | A contract that names a descendant in its `[KnownType]` closure | Same failure, at the root, where there is no member to carry the decline. Merely *having* a descendant is not enough: one this contract never names is one the reflection reader would refuse outright, so declining for it would cost coverage and buy no safety. |
 | `IsReference` contracts | Needs more than an inverse. A `z:Ref` can point at an object the reader has not reached yet, so it needs a fixup pass rather than a straight parse. |
-| `DateOnly`/`TimeOnly` | One inverse each; not yet written, and the format depends on the runtime rather than the contract. |
 | Contracts with no accessible parameterless constructor | `DataContractSerializer` allocates without running a constructor. Generated code has no such option, so these can be written and not read. |
 
 ---
