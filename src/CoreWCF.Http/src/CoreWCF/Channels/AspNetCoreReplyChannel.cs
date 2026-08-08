@@ -120,28 +120,35 @@ namespace CoreWCF.Channels
                 {
                     HttpInput httpInput = requestContext.GetHttpInput(true);
                     (Message requestMessage, Exception requestException, PipeReader reader) = await httpInput.ParseIncomingMessageAsync();
-                    if ((requestMessage == null) && (requestException == null))
+                    try
                     {
-                        await requestContext.SendResponseAndCloseAsync(System.Net.HttpStatusCode.BadRequest);
-                        return;
+                        if ((requestMessage == null) && (requestException == null))
+                        {
+                            await requestContext.SendResponseAndCloseAsync(System.Net.HttpStatusCode.BadRequest);
+                            return;
+                        }
+
+                        if (requestMessage != null)
+                        {
+                            requestMessage.Properties.Add("Microsoft.AspNetCore.Http.HttpContext", context);
+                        }
+
+                        requestContext.SetMessage(requestMessage, requestException);
+
+                        await ChannelDispatcher.DispatchAsync(requestContext);
+                        await requestContext.ReplySent;
                     }
-
-                    if (requestMessage != null)
+                    finally
                     {
-                        requestMessage.Properties.Add("Microsoft.AspNetCore.Http.HttpContext", context);
-                    }
-
-                    requestContext.SetMessage(requestMessage, requestException);
-
-                    await ChannelDispatcher.DispatchAsync(requestContext);
-                    await requestContext.ReplySent;
-
-                    // We need to call CompleteAsync after DispatchAsync to avoid internal buffers being freed.
-                    // Once migrated to .NET6+ we will probably inspect the body response using HttpContext.Request.BodyReader
-                    // .. in that case should the reader be completed ?
-                    if (reader is not null)
-                    {
-                        await reader.CompleteAsync();
+                        // Completed here rather than earlier because the message reads straight out of
+                        // the reader's buffers, which completing releases. A failed dispatch and the
+                        // bad request path above have to release them too.
+                        // Once migrated to .NET6+ we will probably inspect the body response using
+                        // HttpContext.Request.BodyReader .. in that case should the reader be completed ?
+                        if (reader is not null)
+                        {
+                            await reader.CompleteAsync();
+                        }
                     }
                 }
                 catch (Exception ex)

@@ -139,13 +139,22 @@ namespace CoreWCF.Channels
         private async Task<Message> ReadBufferedMessageAsync(PipeReader reader)
         {
             ReadOnlySequence<byte> buffer = ReadOnlySequence<byte>.Empty;
+            // AdvanceTo may only be called for a read that hasn't been advanced yet, so calling it
+            // unconditionally in the finally would throw over the top of whatever ReadAsync failed with.
+            bool advancePending = false;
             Message message = null;
             try
             {
                 while (true)
                 {
                     ReadResult result = await reader.ReadAsync();
+                    advancePending = true;
                     buffer = result.Buffer;
+
+                    if (result.IsCanceled)
+                    {
+                        throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new OperationCanceledException());
+                    }
 
                     if (buffer.Length >= _settings.MaxReceivedMessageSize)
                     {
@@ -158,13 +167,17 @@ namespace CoreWCF.Channels
                     }
 
                     reader.AdvanceTo(buffer.Start, buffer.End);
+                    advancePending = false;
                 }
 
                 message = await DecodeBufferedMessageAsync(buffer);
             }
             finally
             {
-                reader.AdvanceTo(buffer.Start, buffer.End);
+                if (advancePending)
+                {
+                    reader.AdvanceTo(buffer.Start, buffer.End);
+                }
             }
 
             return message;
