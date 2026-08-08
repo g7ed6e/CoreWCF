@@ -156,9 +156,13 @@ namespace CoreWCF.Channels
                         throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new OperationCanceledException());
                     }
 
-                    if (buffer.Length >= _settings.MaxReceivedMessageSize)
+                    // Strictly greater: a body of exactly MaxReceivedMessageSize is allowed, which is
+                    // what both paths this replaced did - GetMessageBuffer() compared ContentLength
+                    // with >, and the chunked path only faulted once a byte past a full buffer
+                    // arrived. Faulting through the helper keeps the 413 that requests answer with.
+                    if (buffer.Length > _settings.MaxReceivedMessageSize)
                     {
-                        throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(MaxMessageSizeStream.CreateMaxReceivedMessageSizeExceededException(_settings.MaxBufferSize));
+                        ThrowMaxReceivedMessageSizeExceeded();
                     }
 
                     if (result.IsCompleted)

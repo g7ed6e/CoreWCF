@@ -30,7 +30,8 @@ namespace CoreWCF.Channels
 
         public abstract MessageEncoder MessageEncoder { get; }
 
-        public ArraySegment<byte> Buffer => throw new NotSupportedException();
+        [Obsolete]
+        public ArraySegment<byte> Buffer => throw new NotSupportedException(SR.BufferedMessageDataBufferNotSupported);
 
         private object ThisLock => this;
 

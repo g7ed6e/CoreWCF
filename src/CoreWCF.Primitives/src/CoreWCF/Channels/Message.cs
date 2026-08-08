@@ -1516,6 +1516,8 @@ namespace CoreWCF.Channels
     public interface IBufferedMessageData
     {
         MessageEncoder MessageEncoder { get; }
+
+        [Obsolete("A message body may span several segments and is no longer backed by a single array. Use IBufferedMessageData2.ReadOnlyBuffer.")]
         ArraySegment<byte> Buffer { get; }
         XmlDictionaryReaderQuotas Quotas { get; }
         void Close();

@@ -540,12 +540,17 @@ namespace CoreWCF.Channels
                             decoder.Reset();
                             int bytesDecoded = decoder.Decode(dictionary);
                             int utf8ValueSize = decoder.Value;
+
+                            // Checked against what is left after the length prefix, not before it:
+                            // otherwise a declared size in between the two passes the guard and the
+                            // slice below throws ArgumentOutOfRangeException over malformed session
+                            // data that should surface as InvalidDataException.
+                            dictionary = dictionary.Slice(bytesDecoded);
                             if (utf8ValueSize > dictionary.Length)
                             {
                                 throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new InvalidDataException(SR.BinaryEncoderSessionMalformed));
                             }
 
-                            dictionary = dictionary.Slice(bytesDecoded);
                             // TODO Once moved .NET5+ use https://learn.microsoft.com/en-us/dotnet/api/system.text.encodingextensions.getstring?view=net-5.0
                             string value = dictionary.Slice(0, utf8ValueSize).ParseAsUTF8String(utf8ValueSize);
                             dictionary = dictionary.Slice(utf8ValueSize);

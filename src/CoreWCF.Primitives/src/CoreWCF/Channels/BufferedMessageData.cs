@@ -25,7 +25,8 @@ namespace CoreWCF.Channels
             _messageStatePool = messageStatePool;
         }
 
-        public ArraySegment<byte> Buffer => throw new NotSupportedException();
+        [Obsolete]
+        public ArraySegment<byte> Buffer => throw new NotSupportedException(SR.BufferedMessageDataBufferNotSupported);
 
         public ReadOnlySequence<byte> ReadOnlyBuffer => _readOnlyBuffer;
 
