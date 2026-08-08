@@ -409,6 +409,7 @@ namespace CoreWCF.Channels
                 UTF8BufferedMessageData messageData = TakeBufferedReader();
                 messageData.Encoding = GetEncodingFromContentType(contentType, _contentEncodingMap);
 
+                messageData.OwnBuffer(buffer, bufferManager);
                 messageData.Open(buffer);
 
                 RecycledMessageState messageState = messageData.TakeMessageState();

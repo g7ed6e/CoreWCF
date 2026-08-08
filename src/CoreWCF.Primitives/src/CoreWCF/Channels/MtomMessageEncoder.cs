@@ -379,6 +379,7 @@ namespace CoreWCF.Channels
             MtomBufferedMessageData messageData = _factory.TakeBufferedReader(this);
             messageData._contentType = contentType;
 
+            messageData.OwnBuffer(buffer, bufferManager);
             messageData.Open(buffer);
 
             RecycledMessageState messageState = messageData.TakeMessageState();

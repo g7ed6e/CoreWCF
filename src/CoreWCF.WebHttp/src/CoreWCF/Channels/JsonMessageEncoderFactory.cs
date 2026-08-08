@@ -151,6 +151,7 @@ namespace CoreWCF.Channels
                 JsonBufferedMessageData messageData = TakeBufferedReader();
                 messageData.Encoding = ContentTypeHelpers.GetEncodingFromContentType(contentType, JsonMessageEncoderFactory.s_applicationJsonContentEncoding);
 
+                messageData.OwnBuffer(buffer, bufferManager);
                 messageData.Open(buffer);
 
                 RecycledMessageState messageState = messageData.TakeMessageState();

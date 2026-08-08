@@ -598,6 +598,9 @@ namespace CoreWCF.Channels
                     }
                 }
                 BinaryBufferedMessageData messageData = _factory.TakeBufferedData(this);
+                // Declared before either path below: the pattern path opens a synthesized sequence,
+                // but the array to give back is always the one this method was handed.
+                messageData.OwnBuffer(buffer, bufferManager);
                 Message message;
                 if (_messagePatterns != null)
                 {

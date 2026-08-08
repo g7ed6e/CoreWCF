@@ -3,6 +3,7 @@
 
 using System;
 using System.Buffers;
+using System.Runtime.InteropServices;
 using System.Xml;
 using CoreWCF.Runtime;
 
@@ -11,6 +12,8 @@ namespace CoreWCF.Channels
     internal abstract class BufferedMessageData : IBufferedMessageData2
     {
         private ReadOnlySequence<byte> _readOnlyBuffer;
+        private BufferManager _bufferManager;
+        private byte[] _rentedBuffer;
         private int _refCount;
         private int _outstandingReaders;
         private bool _multipleUsers;
@@ -58,6 +61,14 @@ namespace CoreWCF.Channels
         {
             if (_outstandingReaders == 0)
             {
+                if (_bufferManager != null && _rentedBuffer != null)
+                {
+                    _bufferManager.ReturnBuffer(_rentedBuffer);
+                }
+
+                _bufferManager = null;
+                _rentedBuffer = null;
+                _readOnlyBuffer = default;
                 OnClosed();
             }
         }
@@ -166,6 +177,23 @@ namespace CoreWCF.Channels
             _refCount = 1;
             _readOnlyBuffer = buffer;
             _multipleUsers = false;
+        }
+
+        /// <summary>
+        /// Hands ownership of <paramref name="rentedBuffer"/> to this instance: the array behind it
+        /// goes back to <paramref name="bufferManager"/> once the message closes. Callers reading
+        /// out of memory they don't own - a PipeReader's own buffers, for instance - never call this.
+        /// </summary>
+        public void OwnBuffer(ReadOnlySequence<byte> rentedBuffer, BufferManager bufferManager)
+        {
+            if (bufferManager != null
+                && rentedBuffer.IsSingleSegment
+                && MemoryMarshal.TryGetArray(rentedBuffer.First, out ArraySegment<byte> segment)
+                && segment.Array != null)
+            {
+                _rentedBuffer = segment.Array;
+                _bufferManager = bufferManager;
+            }
         }
 
         protected abstract void ReturnXmlReader(XmlDictionaryReader xmlReader);

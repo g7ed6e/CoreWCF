@@ -170,7 +170,22 @@ namespace CoreWCF.Channels
                     advancePending = false;
                 }
 
-                message = await DecodeBufferedMessageAsync(buffer);
+                // The message reads straight out of the buffer it is handed and gives it back to
+                // the BufferManager once it closes, so it can't be handed the reader's own memory:
+                // that belongs to the pipe, which recycles it as soon as the reader is advanced.
+                int messageLength = (int)buffer.Length;
+                byte[] messageBuffer = _bufferManager.TakeBuffer(messageLength);
+                try
+                {
+                    buffer.CopyTo(messageBuffer.AsSpan(0, messageLength));
+                    message = await DecodeBufferedMessageAsync(new ReadOnlySequence<byte>(messageBuffer, 0, messageLength));
+                }
+                catch
+                {
+                    // Ownership only transfers to the message once it exists.
+                    _bufferManager.ReturnBuffer(messageBuffer);
+                    throw;
+                }
             }
             finally
             {
