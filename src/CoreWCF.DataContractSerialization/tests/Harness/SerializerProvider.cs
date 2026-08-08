@@ -48,6 +48,18 @@ namespace CoreWCF.DataContractSerialization.Tests.Harness
         }
 
         /// <summary>
+        /// Serializes one corpus case and returns the exact bytes written.
+        /// </summary>
+        /// <remarks>
+        /// Virtual because the two producers reach their serializer through different contracts -
+        /// the reflection one through <see cref="XmlObjectSerializer"/>, the generated one through
+        /// the attribute-free <c>AotXmlObjectSerializer</c>. The writer configuration is identical
+        /// either way, so the bytes remain directly comparable.
+        /// </remarks>
+        public virtual byte[] Capture(CorpusCase corpusCase) =>
+            FixtureWriter.Capture(CreateSerializer(corpusCase), corpusCase.CreateInstance());
+
+        /// <summary>
         /// Lets a provider declare that it does not support a case yet, without deleting the case.
         /// The unsupported list is then visible in test output and shrinks as the generator matures.
         /// </summary>

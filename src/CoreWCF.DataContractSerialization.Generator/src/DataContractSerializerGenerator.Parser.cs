@@ -96,6 +96,16 @@ public sealed partial class DataContractSerializerGenerator
             string contractName = GetNamedArgument(dataContract, "Name") ?? contractType.Name;
             string contractNamespace = GetNamedArgument(dataContract, "Namespace") ?? DefaultNamespaceFor(contractType);
 
+            string? unsupportedReason = null;
+
+            // The first slice writes flat contracts only. A contract with a base class, or with a
+            // member this generator cannot yet write, is left to the reflection-based serializer.
+            if (contractType.BaseType is { SpecialType: not SpecialType.System_Object } baseType
+                && baseType.SpecialType != SpecialType.System_ValueType)
+            {
+                unsupportedReason = "inheritance is not supported yet (base type " + baseType.Name + ")";
+            }
+
             List<MemberSpec> members = new();
             foreach (ISymbol member in contractType.GetMembers())
             {
@@ -106,16 +116,30 @@ public sealed partial class DataContractSerializerGenerator
                     continue;
                 }
 
-                string? memberTypeName = member switch
+                ITypeSymbol? memberType = member switch
                 {
-                    IPropertySymbol property => property.Type.ToDisplayString(FullyQualifiedFormat),
-                    IFieldSymbol field => field.Type.ToDisplayString(FullyQualifiedFormat),
+                    IPropertySymbol property => property.Type,
+                    IFieldSymbol field => field.Type,
                     _ => null
                 };
 
-                if (memberTypeName is null)
+                if (memberType is null)
                 {
                     continue;
+                }
+
+                // Generated code lives in the context's assembly, so it can only reach members the
+                // context can see. Anything less visible keeps its contract on the reflection path.
+                if (member.DeclaredAccessibility != Accessibility.Public)
+                {
+                    unsupportedReason ??= "member '" + member.Name + "' is not public";
+                }
+
+                MemberKind kind = ClassifyMember(memberType, out bool isNullableValueType);
+                if (kind == MemberKind.Unsupported)
+                {
+                    unsupportedReason ??= "member '" + member.Name + "' has unsupported type '" +
+                                          memberType.ToDisplayString() + "'";
                 }
 
                 members.Add(new MemberSpec(
@@ -124,7 +148,8 @@ public sealed partial class DataContractSerializerGenerator
                     EmitDefaultValue: GetNamedArgumentBoolean(dataMember, "EmitDefaultValue") ?? true,
                     IsRequired: GetNamedArgumentBoolean(dataMember, "IsRequired") ?? false,
                     MemberName: member.Name,
-                    TypeFullyQualifiedName: memberTypeName));
+                    Kind: kind,
+                    IsNullableValueType: isNullableValueType));
             }
 
             // Order ascending, then ordinal by contract name. Unspecified Order is -1 and cannot be
@@ -140,7 +165,68 @@ public sealed partial class DataContractSerializerGenerator
                 contractType.ToDisplayString(FullyQualifiedFormat),
                 contractName,
                 contractNamespace,
-                new EquatableArray<MemberSpec>(members.ToArray()));
+                new EquatableArray<MemberSpec>(members.ToArray()),
+                unsupportedReason);
+        }
+
+        /// <summary>
+        /// Maps a member's CLR type onto how its value is written, or
+        /// <see cref="MemberKind.Unsupported"/> when this generator cannot write it yet.
+        /// </summary>
+        private static MemberKind ClassifyMember(ITypeSymbol type, out bool isNullableValueType)
+        {
+            isNullableValueType = false;
+
+            if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+                && nullable.TypeArguments.Length == 1)
+            {
+                isNullableValueType = true;
+                type = nullable.TypeArguments[0];
+            }
+
+            if (type is IArrayTypeSymbol { Rank: 1 } array
+                && array.ElementType.SpecialType == SpecialType.System_Byte)
+            {
+                return isNullableValueType ? MemberKind.Unsupported : MemberKind.ByteArray;
+            }
+
+            MemberKind kind = type.SpecialType switch
+            {
+                SpecialType.System_Boolean => MemberKind.Boolean,
+                SpecialType.System_Byte => MemberKind.Byte,
+                SpecialType.System_SByte => MemberKind.SByte,
+                SpecialType.System_Int16 => MemberKind.Int16,
+                SpecialType.System_UInt16 => MemberKind.UInt16,
+                SpecialType.System_Int32 => MemberKind.Int32,
+                SpecialType.System_UInt32 => MemberKind.UInt32,
+                SpecialType.System_Int64 => MemberKind.Int64,
+                SpecialType.System_UInt64 => MemberKind.UInt64,
+                SpecialType.System_Single => MemberKind.Single,
+                SpecialType.System_Double => MemberKind.Double,
+                SpecialType.System_Decimal => MemberKind.Decimal,
+                SpecialType.System_Char => MemberKind.Char,
+                SpecialType.System_String => MemberKind.String,
+                SpecialType.System_DateTime => MemberKind.DateTime,
+                _ => MemberKind.Unsupported
+            };
+
+            if (kind != MemberKind.Unsupported)
+            {
+                // A nullable reference type is just the reference type; only value types wrap.
+                if (isNullableValueType && !type.IsValueType)
+                {
+                    isNullableValueType = false;
+                }
+
+                return kind;
+            }
+
+            return type.ToDisplayString() switch
+            {
+                "System.Guid" => MemberKind.Guid,
+                "System.TimeSpan" => MemberKind.TimeSpan,
+                _ => MemberKind.Unsupported
+            };
         }
 
         /// <summary>

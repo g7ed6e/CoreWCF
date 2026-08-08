@@ -32,8 +32,7 @@ namespace CoreWCF.DataContractSerialization.Tests
                 Assert.Skip(Provider.Id + " does not support '" + caseId + "' yet: " + reason);
             }
 
-            XmlObjectSerializer serializer = Provider.CreateSerializer(corpusCase);
-            byte[] actual = FixtureWriter.Capture(serializer, corpusCase.CreateInstance());
+            byte[] actual = Provider.Capture(corpusCase);
 
             byte[] expected;
             string resolvedPath;
@@ -55,5 +54,19 @@ namespace CoreWCF.DataContractSerialization.Tests
     public sealed class ReflectionGoldenRecordTests : GoldenRecordTestsBase
     {
         protected override SerializerProvider Provider { get; } = new ReflectionSerializerProvider();
+    }
+
+    /// <summary>
+    /// The real test: source-generated output measured byte for byte against bytes the generator
+    /// had no part in producing.
+    /// </summary>
+    /// <remarks>
+    /// Cases the generator cannot yet handle report a reason and skip. That skip list, not this
+    /// class, is the coverage report - and a fixture is never regenerated to make a case pass,
+    /// because a mismatch means the generator is wrong.
+    /// </remarks>
+    public sealed class GeneratedGoldenRecordTests : GoldenRecordTestsBase
+    {
+        protected override SerializerProvider Provider { get; } = new GeneratedSerializerProvider();
     }
 }

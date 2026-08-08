@@ -8,11 +8,21 @@ namespace CoreWCF.DataContractSerialization.Generator;
 public sealed partial class DataContractSerializerGenerator
 {
     /// <summary>One data contract, reduced to what the emitter needs to write it.</summary>
+    /// <remarks>
+    /// A contract the generator cannot yet write is kept in the spec with
+    /// <see cref="UnsupportedReason"/> set rather than dropped, so the emitter can record why in a
+    /// comment. No serializer is emitted for it and <c>GetSerializer</c> returns null, which sends
+    /// CoreWCF back to the reflection-based serializer - a correct outcome, not a failure.
+    /// </remarks>
     internal sealed record ContractSpec(
         string FullyQualifiedName,
         string ContractName,
         string ContractNamespace,
-        EquatableArray<MemberSpec> Members) : IEquatable<ContractSpec>;
+        EquatableArray<MemberSpec> Members,
+        string? UnsupportedReason) : IEquatable<ContractSpec>
+    {
+        public bool IsSupported => UnsupportedReason is null;
+    }
 
     /// <summary>
     /// One <c>[DataMember]</c>, already resolved to its wire name and ordering key.
@@ -30,5 +40,33 @@ public sealed partial class DataContractSerializerGenerator
         bool EmitDefaultValue,
         bool IsRequired,
         string MemberName,
-        string TypeFullyQualifiedName) : IEquatable<MemberSpec>;
+        MemberKind Kind,
+        bool IsNullableValueType) : IEquatable<MemberSpec>;
+
+    /// <summary>
+    /// How a member's value is written. Mirrors the primitive cases XmlWriterDelegator handles in
+    /// dotnet/runtime; anything not listed here makes its contract unsupported for now.
+    /// </summary>
+    internal enum MemberKind
+    {
+        Unsupported = 0,
+        Boolean,
+        Byte,
+        SByte,
+        Int16,
+        UInt16,
+        Int32,
+        UInt32,
+        Int64,
+        UInt64,
+        Single,
+        Double,
+        Decimal,
+        Char,
+        String,
+        Guid,
+        DateTime,
+        TimeSpan,
+        ByteArray
+    }
 }

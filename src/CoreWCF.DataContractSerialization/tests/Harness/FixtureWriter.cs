@@ -13,6 +13,26 @@ namespace CoreWCF.DataContractSerialization.Tests.Harness
     /// </summary>
     internal static class FixtureWriter
     {
+        /// <summary>
+        /// Captures a source-generated serializer's output. Byte-for-byte comparable with the
+        /// reflection-based overload below, which is the entire point: both go through the same
+        /// writer, configured identically.
+        /// </summary>
+        public static byte[] Capture(CoreWCF.Runtime.Serialization.AotXmlObjectSerializer serializer, object graph)
+        {
+            using (MemoryStream stream = new MemoryStream())
+            {
+                using (XmlDictionaryWriter writer = XmlDictionaryWriter.CreateTextWriter(
+                    stream, new UTF8Encoding(false), ownsStream: false))
+                {
+                    serializer.WriteObject(writer, graph);
+                    writer.Flush();
+                }
+
+                return stream.ToArray();
+            }
+        }
+
         public static byte[] Capture(XmlObjectSerializer serializer, object graph)
         {
             using (MemoryStream stream = new MemoryStream())
