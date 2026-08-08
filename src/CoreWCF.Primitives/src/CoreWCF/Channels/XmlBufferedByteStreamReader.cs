@@ -12,6 +12,9 @@ namespace CoreWCF.Channels
     internal class XmlBufferedByteStreamReader : XmlByteStreamReader
     {
         private ByteStreamBufferedMessageData _bufferedMessageData;
+
+        // How much of ReadOnlyBuffer has already been handed out by ReadContentAsBase64. This is a
+        // position within the sequence, not an index into any one of its segments.
         private int _offset;
 
         public XmlBufferedByteStreamReader(ByteStreamBufferedMessageData bufferedMessageData, XmlDictionaryReaderQuotas quotas) : base(quotas)
@@ -20,7 +23,7 @@ namespace CoreWCF.Channels
             _bufferedMessageData = bufferedMessageData;
             _bufferedMessageData.Open();
 
-            _offset = bufferedMessageData.ReadOnlyBuffer.Start.GetInteger();
+            _offset = 0;
             this.quotas = quotas;
             position = ReaderPosition.None;
         }
@@ -51,7 +54,7 @@ namespace CoreWCF.Channels
                 return 0;
             }
 
-            _bufferedMessageData.ReadOnlyBuffer.CopyTo(buffer.AsSpan().Slice(index, bytesToCopy));
+            _bufferedMessageData.ReadOnlyBuffer.Slice(_offset, bytesToCopy).CopyTo(buffer.AsSpan(index, bytesToCopy));
             _offset += bytesToCopy;
 
             return bytesToCopy;

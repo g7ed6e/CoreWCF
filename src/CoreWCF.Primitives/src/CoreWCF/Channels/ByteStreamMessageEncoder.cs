@@ -68,11 +68,6 @@ namespace CoreWCF.Channels
 
         public override ValueTask<Message> ReadMessageAsync(ReadOnlySequence<byte> buffer, BufferManager bufferManager, string contentType)
         {
-            if (buffer.IsEmpty)
-            {
-                throw Fx.Exception.Argument(nameof(buffer), SR.BufferCannotBeEmpty);
-            }
-
             if (bufferManager == null)
             {
                 throw Fx.Exception.ArgumentNull(nameof(bufferManager));

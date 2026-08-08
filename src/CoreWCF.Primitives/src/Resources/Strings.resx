@@ -9729,9 +9729,6 @@
   <data name="WebHostRequired" xml:space="preserve">
     <value>WebHost required for the CoreWCF service configuration. Use IApplicationBuilder.UseServiceModel instead.</value>
   </data>
-  <data name="BufferCannotBeEmpty" xml:space="preserve">
-    <value>The buffer cannot be empty</value>
-  </data>
   <data name="PublicKeyNotFoundInX509SecurityKey" xml:space="preserve">
     <value>PublicKey is not found in the X509SecurityKey. SignatureMethod is {0}</value>
   </data>

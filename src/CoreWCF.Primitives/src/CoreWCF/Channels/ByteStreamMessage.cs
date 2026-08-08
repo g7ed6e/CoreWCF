@@ -5,6 +5,7 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Xml;
 using CoreWCF.Runtime;
 
@@ -378,6 +379,33 @@ namespace CoreWCF.Channels
                             xmlByteStreamWriter.WriteBase64(memory);
                         }
                     }
+                    else
+                    {
+                        // Any other XmlDictionaryWriter only accepts byte[], so write the sequence
+                        // segment by segment, renting scratch space only for segments that aren't
+                        // array backed. Successive WriteBase64 calls build a single base64 node.
+                        foreach (ReadOnlyMemory<byte> memory in MessageData.ReadOnlyBuffer)
+                        {
+                            if (MemoryMarshal.TryGetArray(memory, out ArraySegment<byte> segment))
+                            {
+                                writer.WriteBase64(segment.Array, segment.Offset, segment.Count);
+                            }
+                            else
+                            {
+                                byte[] scratch = ArrayPool<byte>.Shared.Rent(memory.Length);
+                                try
+                                {
+                                    memory.Span.CopyTo(scratch);
+                                    writer.WriteBase64(scratch, 0, memory.Length);
+                                }
+                                finally
+                                {
+                                    ArrayPool<byte>.Shared.Return(scratch);
+                                }
+                            }
+                        }
+                    }
+
                     writer.WriteEndElement();
                 }
             }
