@@ -54,6 +54,22 @@ Every `[DataContract]` type in the corpus assembly must be either registered or 
 with `builder.Skip<T>("reason")` - `CorpusIntegrityTests` enforces it. That turns "what is not
 covered yet" into a greppable list instead of tribal knowledge.
 
+### Importing more upstream types
+
+`TestCorpus/src/SerializationTestTypes/import.ps1` downloads a file at a pinned commit, checks the
+licence header, injects the provenance block and reports any local `// CoreWCF:` modification the
+overwrite would discard:
+
+```powershell
+cd src\CoreWCF.DataContractSerialization.TestCorpus\src\SerializationTestTypes
+./import.ps1 -Sha <40-char-sha> -File InheritanceCases.cs -WhatIf   # drop -WhatIf to apply
+```
+
+Then build every target framework, add a `Catalog/CorpusCatalog.<file>.cs` registrar - remembering
+its `static partial void` declaration **and** its call in the `CorpusCatalog` static constructor -
+and regenerate. See `SerializationTestTypes/UPSTREAM.md` for what is imported, what is deferred and
+why.
+
 ### Instances must be deterministic
 
 The instance is part of the golden record's identity. Forbidden in a factory:

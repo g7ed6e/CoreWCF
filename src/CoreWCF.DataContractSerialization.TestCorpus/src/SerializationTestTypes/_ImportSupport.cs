@@ -23,6 +23,44 @@ namespace SerializationTestTypes
     {
     }
 
+    // Copied from https://github.com/dotnet/runtime/blob/bbfaee3bfa7edb0d556556bc32778d09a745134b/src/libraries/System.Runtime.Serialization.Xml/tests/SerializationTestTypes/ObjRefSample.cs#L9
+    // Referenced by InheritanceCases.cs. ObjRefSample.cs is not imported wholesale because it also
+    // declares SerIser, an ISerializable type that is out of scope for v1.
+    [DataContract(IsReference = true)]
+    public class SimpleDC
+    {
+        [DataMember]
+        public string Data;
+
+        public SimpleDC() { }
+
+        public SimpleDC(bool init)
+        {
+            Data = "This is a string";
+        }
+    }
+
+    // Copied from https://github.com/dotnet/runtime/blob/bbfaee3bfa7edb0d556556bc32778d09a745134b/src/libraries/System.Runtime.Serialization.Xml/tests/SerializationTestTypes/ObjRefSample.cs#L38
+    // Referenced by InheritanceObjectRef.cs. Two members pointing at the same instance, so it
+    // exercises z:Ref within a reference-preserving contract.
+    [DataContract(IsReference = true)]
+    public class SimpleDCWithRef
+    {
+        [DataMember]
+        public SimpleDC Data;
+
+        [DataMember]
+        public SimpleDC RefData;
+
+        public SimpleDCWithRef() { }
+
+        public SimpleDCWithRef(bool init)
+        {
+            Data = new SimpleDC(true);
+            RefData = Data;
+        }
+    }
+
     // Copied from https://github.com/dotnet/runtime/blob/bbfaee3bfa7edb0d556556bc32778d09a745134b/src/libraries/System.Runtime.Serialization.Xml/tests/SerializationTestTypes/SampleTypes.cs#L5650
     [DataContract]
     public struct PublicDCStruct

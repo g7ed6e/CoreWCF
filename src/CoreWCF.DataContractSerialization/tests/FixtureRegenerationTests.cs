@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -48,12 +49,26 @@ namespace CoreWCF.DataContractSerialization.Tests
             Dictionary<FixtureWriteResult, int> counts = new Dictionary<FixtureWriteResult, int>();
             List<string> notable = new List<string>();
 
+            List<string> failures = new List<string>();
+
             foreach (CorpusCase corpusCase in CorpusCatalog.Cases)
             {
-                XmlObjectSerializer serializer = provider.CreateSerializer(corpusCase);
-                byte[] captured = FixtureWriter.Capture(serializer, corpusCase.CreateInstance());
-
-                FixtureWriteResult result = FixtureStore.Write(sourceDirectory, corpusCase.FixtureFileName, captured);
+                FixtureWriteResult result;
+                try
+                {
+                    XmlObjectSerializer serializer = provider.CreateSerializer(corpusCase);
+                    byte[] captured = FixtureWriter.Capture(serializer, corpusCase.CreateInstance());
+                    result = FixtureStore.Write(sourceDirectory, corpusCase.FixtureFileName, captured);
+                }
+                catch (Exception error)
+                {
+                    // Keep going. Aborting on the first bad case leaves the fixture set half
+                    // rewritten and hides every other problem behind one stack trace - and a case
+                    // that cannot be serialized at all usually means it needs a Skip, which is
+                    // easier to decide with the full list in hand.
+                    failures.Add("  " + corpusCase.Id + ": " + error.GetType().Name + ": " + error.Message);
+                    continue;
+                }
 
                 int count;
                 counts.TryGetValue(result, out count);
@@ -75,6 +90,18 @@ namespace CoreWCF.DataContractSerialization.Tests
             foreach (KeyValuePair<FixtureWriteResult, int> entry in counts)
             {
                 report.AppendLine("  " + entry.Key + ": " + entry.Value.ToString(CultureInfo.InvariantCulture));
+            }
+
+            if (failures.Count > 0)
+            {
+                report.AppendLine();
+                report.AppendLine(failures.Count.ToString(CultureInfo.InvariantCulture) +
+                                  " case(s) could not be serialized at all. Each needs either a fix or a " +
+                                  "builder.Skip<T>(reason):");
+                foreach (string line in failures)
+                {
+                    report.AppendLine(line);
+                }
             }
 
             if (notable.Count > 0)

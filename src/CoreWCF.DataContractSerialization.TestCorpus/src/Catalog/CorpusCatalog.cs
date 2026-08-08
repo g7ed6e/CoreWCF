@@ -25,6 +25,7 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
             // erased by the compiler, so a registrar can be declared before its file is imported.
             RegisterSanity(builder);
             RegisterPrimitives(builder);
+            RegisterInheritance(builder);
 
             s_cases = builder.BuildCases();
             s_exclusions = builder.BuildExclusions();
@@ -71,5 +72,7 @@ namespace CoreWCF.DataContractSerialization.TestCorpus
         static partial void RegisterSanity(CorpusBuilder builder);
 
         static partial void RegisterPrimitives(CorpusBuilder builder);
+
+        static partial void RegisterInheritance(CorpusBuilder builder);
     }
 }
