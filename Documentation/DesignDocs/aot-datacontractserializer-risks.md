@@ -620,19 +620,22 @@ Closing it means writing collections into an object member, which needs the coll
 naming rules the generator does not implement yet. `AllTypes.array1` is the corpus case waiting on
 it, though that contract is blocked on several other things too.
 
-### 5a. `ReadObject` is built but not yet called
+### 5a. ~~`ReadObject` is built but not yet called~~ - closed
 
-`PartInfo.WriteObject` prefers the generated serializer. `PartInfo.ReadObject` does not: it goes
-straight to `Serializer` and never consults `AotSerializer` or `CanReadObject`, so **every read runs
-through reflection today** regardless of what the generator produced.
+`PartInfo` now prefers the generated serializer for reading as well as writing, gated on
+`CanReadObject` so the two directions stay independent.
 
-The read half is built and verified against the corpus - 79 of 86 cases reproduce their fixture - it
-is simply not reachable from CoreWCF yet. Closing this is one branch in `PartInfo`, mirroring the one
-`WriteObject` already has, plus the `CanReadObject` test that decides between them.
+Two things were needed rather than one. `IsStartObject` was being asked of `part.Serializer` at three
+call sites, which constructs the reflection-based serializer - the thing the generated path exists to
+avoid - so it moved onto `PartInfo` too. Both now resolve through a single `ReadingSerializer`
+property, because they have to agree: a part recognised by one serializer and then read by the other
+is a part read by something that does not recognise it.
 
-Worth stating rather than assuming: until that branch exists, `COREWCF_0404` describes a property of
-the generated serializer rather than a difference in CoreWCF's behaviour, because nothing reads
-through it either way.
+The seam had no test in either direction before this - the switch defaults off, so nothing in the
+suite had ever taken the generated branch. `PartInfoSerializerSelectionTests` covers it by planting a
+recording serializer on the part rather than by turning the switch on, since the switch resolves into
+a process-wide `Lazy` that would leak into a concurrent suite, and its own resolution order is
+already covered elsewhere.
 
 ### 5. The seam has gaps this work does not close
 
