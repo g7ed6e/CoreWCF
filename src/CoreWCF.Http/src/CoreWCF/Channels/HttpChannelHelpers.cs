@@ -111,16 +111,20 @@ namespace CoreWCF.Channels
 
         private void ThrowMaxReceivedMessageSizeExceeded()
         {
+            throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
+                CreateMaxReceivedMessageSizeExceededException(_settings.MaxReceivedMessageSize));
+        }
+
+        private Exception CreateMaxReceivedMessageSizeExceededException(long maxMessageSize)
+        {
+            string message = SR.Format(SR.MaxReceivedMessageSizeExceeded, maxMessageSize);
+
             if (_isRequest)
             {
-                ThrowHttpProtocolException(SR.Format(SR.MaxReceivedMessageSizeExceeded, _settings.MaxReceivedMessageSize), HttpStatusCode.RequestEntityTooLarge);
+                return CreateHttpProtocolException(message, HttpStatusCode.RequestEntityTooLarge, null, WebException);
             }
-            else
-            {
-                string message = SR.Format(SR.MaxReceivedMessageSizeExceeded, _settings.MaxReceivedMessageSize);
-                Exception inner = new QuotaExceededException(message);
-                throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new CommunicationException(message, inner));
-            }
+
+            return new CommunicationException(message, new QuotaExceededException(message));
         }
 
         private async ValueTask<Message> DecodeBufferedMessageAsync(ReadOnlySequence<byte> buffer)
@@ -138,6 +142,8 @@ namespace CoreWCF.Channels
 
         private async Task<Message> ReadBufferedMessageAsync(PipeReader reader)
         {
+            reader = new MaxMessageSizePipeReader(reader, _settings.MaxReceivedMessageSize, CreateMaxReceivedMessageSizeExceededException);
+
             ReadOnlySequence<byte> buffer = ReadOnlySequence<byte>.Empty;
             // AdvanceTo may only be called for a read that hasn't been advanced yet, so calling it
             // unconditionally in the finally would throw over the top of whatever ReadAsync failed with.
@@ -156,15 +162,14 @@ namespace CoreWCF.Channels
                         throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(new OperationCanceledException());
                     }
 
-                    // Strictly greater: a body of exactly MaxReceivedMessageSize is allowed, which is
-                    // what both paths this replaced did - GetMessageBuffer() compared ContentLength
-                    // with >, and the chunked path only faulted once a byte past a full buffer
-                    // arrived. Faulting through the helper keeps the 413 that requests answer with.
-                    if (buffer.Length > _settings.MaxReceivedMessageSize)
-                    {
-                        ThrowMaxReceivedMessageSizeExceeded();
-                    }
+                    // MaxReceivedMessageSize is enforced by the reader above. A body of exactly
+                    // that size is allowed, which is what both paths this replaced did:
+                    // GetMessageBuffer() compared ContentLength with >, and the chunked path only
+                    // faulted once a byte past a full buffer arrived.
 
+                    // MaxBufferSize is a tighter, separate ceiling that only applies while a whole
+                    // message is being buffered, and it faults as soon as the buffer is full rather
+                    // than one byte later, so it stays here rather than layering a second reader.
                     // A chunked body has no ContentLength to size the read against, so the path
                     // this replaced grew its buffer only up to MaxBufferSize and faulted there.
                     if (ContentLength == -1 && buffer.Length >= _settings.MaxBufferSize)
@@ -212,11 +217,13 @@ namespace CoreWCF.Channels
 
         private async Task<Message> ReadStreamedMessageAsync(PipeReader reader)
         {
-            MaxMessageSizeStream maxMessageSizeStream = new(reader.AsStream(), _settings.MaxReceivedMessageSize);
+            // The default factory, not the one the buffered path uses: streamed reads went through
+            // MaxMessageSizeStream and faulted with a CommunicationException rather than a 413.
+            Stream stream = new MaxMessageSizePipeReader(reader, _settings.MaxReceivedMessageSize).AsStream();
 
             try
             {
-                return await _messageEncoder.ReadMessageAsync(maxMessageSizeStream, _settings.MaxBufferSize, ContentType);
+                return await _messageEncoder.ReadMessageAsync(stream, _settings.MaxBufferSize, ContentType);
             }
             catch (XmlException xmlException)
             {
