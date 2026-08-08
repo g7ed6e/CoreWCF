@@ -33,10 +33,20 @@ namespace CoreWCF.DataContractSerialization
 
         public override AotXmlObjectSerializer CreateAotSerializer(Type type, XmlDictionaryString name, XmlDictionaryString ns, IList<Type> knownTypes)
         {
-            // knownTypes is not consulted yet: the first generator slice emits no polymorphic
-            // output, so a contract needing [KnownType] resolution has no generated serializer and
-            // this returns null, taking the reflection path. When i:type emission lands, the
-            // generated serializer will need these to resolve derived types.
+            // Known types mean a member may hold a derived instance, which the real serializer
+            // signals with an i:type attribute and the derived contract's members. Generated
+            // serializers do not emit that yet, and writing the declared type's members instead
+            // would produce wrong XML rather than falling back - so decline and let the
+            // reflection-based serializer handle it.
+            //
+            // The generator makes the same judgement at compile time from [KnownType] attributes;
+            // this catches the case where CoreWCF supplies known types from the operation contract
+            // instead, which no attribute would reveal.
+            if (knownTypes != null && knownTypes.Count > 0)
+            {
+                return null;
+            }
+
             return _context.GetSerializer(type, name, ns);
         }
     }

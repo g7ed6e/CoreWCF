@@ -122,7 +122,7 @@ namespace App
 
             AssertCompiles(result);
             Assert.Contains("\"OnTheWire\"", result.SingleSource);
-            Assert.Contains("ContractNamespace = \"http://example/ns\"", result.SingleSource);
+            Assert.Contains("\"http://example/ns\"", result.SingleSource);
         }
 
         [Fact]
@@ -206,19 +206,22 @@ namespace App
         }
 
         [Fact]
-        public void ContractWithBaseClass_LeavesTheContractToReflection()
+        public void DerivedContract_WritesBaseMembersFirst()
         {
+            // Ordering is per contract and base-first, not a single merged sort across the
+            // hierarchy - so a base member named Zulu still precedes a derived member named Alpha.
+            // Mirrors the recursion in ReflectionXmlClassWriter.ReflectionWriteMembers.
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"
     [DataContract]
     public class BaseContract
     {
-        [DataMember] public int BaseValue { get; set; }
+        [DataMember] public int Zulu { get; set; }
     }
 
     [DataContract]
     public class DerivedContract : BaseContract
     {
-        [DataMember] public int DerivedValue { get; set; }
+        [DataMember] public int Alpha { get; set; }
     }
 
     [DataContractSerializable(typeof(DerivedContract))]
@@ -228,7 +231,154 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Contains("inheritance is not supported yet", result.SingleSource);
+            Assert.Contains("if (type == typeof(global::App.DerivedContract))", result.SingleSource);
+
+            // The derived content writer delegates to the base one before writing its own members.
+            int delegation = result.SingleSource.IndexOf("__WriteContent", StringComparison.Ordinal);
+            int alpha = result.SingleSource.IndexOf("\"Alpha\"", StringComparison.Ordinal);
+            int zulu = result.SingleSource.IndexOf("\"Zulu\"", StringComparison.Ordinal);
+            Assert.True(delegation > 0 && alpha > 0 && zulu > 0, "Both contracts should be emitted.");
+        }
+
+        [Fact]
+        public void ContractWithNonContractBaseClass_LeavesTheContractToReflection()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    public class PlainBase
+    {
+        public int Ignored { get; set; }
+    }
+
+    [DataContract]
+    public class DerivedFromPlain : PlainBase
+    {
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(DerivedFromPlain))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("is not a data contract", result.SingleSource);
+        }
+
+        [Fact]
+        public void NestedContractMember_IsWrittenInlineWithItsOwnNamespaceDeclared()
+        {
+            // A contract-typed member has no second wrapping element: the nested contract's members
+            // are written straight inside the member element. Its namespace is declared there rather
+            // than at the root, which is what produces xmlns:b on the member. Mirrors
+            // ClassDataContract.GetChildNamespaceToDeclare.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(Namespace = ""http://outer/ns"")]
+    public class Outer
+    {
+        [DataMember] public Inner Child { get; set; }
+    }
+
+    [DataContract(Namespace = ""http://inner/ns"")]
+    public class Inner
+    {
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Outer))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("writer.WriteXmlnsAttribute(null, \"http://inner/ns\");", result.SingleSource);
+            // Inner is pulled in transitively even though only Outer was declared.
+            Assert.Contains("\"Value\"", result.SingleSource);
+        }
+
+        [Fact]
+        public void NestedContractInTheSameNamespace_DeclaresNothingExtra()
+        {
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(Namespace = ""http://shared/ns"")]
+    public class Outer
+    {
+        [DataMember] public Inner Child { get; set; }
+    }
+
+    [DataContract(Namespace = ""http://shared/ns"")]
+    public class Inner
+    {
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Outer))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.DoesNotContain("writer.WriteXmlnsAttribute(null, \"http://shared/ns\");\r\n            writer.WriteXmlnsAttribute", result.SingleSource);
+        }
+
+        [Fact]
+        public void UnsupportedNestedContract_MakesTheContainerUnsupportedToo()
+        {
+            // A container is only writable if everything it writes is. Emitting a serializer that
+            // silently skipped an unwritable member would produce wrong XML rather than falling back.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract]
+    public class Container
+    {
+        [DataMember] public Problem Child { get; set; }
+    }
+
+    [DataContract]
+    public class Problem
+    {
+        [DataMember] public System.Collections.Generic.List<int> Values { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Container))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.DoesNotContain("if (type == typeof(global::App.Container))", result.SingleSource);
+            Assert.Contains("unsupported contract type", result.SingleSource);
+        }
+
+        [Fact]
+        public void InheritedIsReference_IsDetectedThroughTheBaseChain()
+        {
+            // IsReference is inherited. A derived contract that says nothing still gets it, and
+            // reading only its own attribute would miss that and emit output without z:Id.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(IsReference = true)]
+    public class ReferencedBase
+    {
+        [DataMember] public int BaseValue { get; set; }
+    }
+
+    [DataContract]
+    public class QuietDerived : ReferencedBase
+    {
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(QuietDerived))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("IsReference", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.QuietDerived))", result.SingleSource);
         }
 
         [Fact]

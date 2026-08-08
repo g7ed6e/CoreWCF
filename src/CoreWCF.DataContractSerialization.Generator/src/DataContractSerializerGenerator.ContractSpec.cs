@@ -19,9 +19,15 @@ public sealed partial class DataContractSerializerGenerator
         string ContractName,
         string ContractNamespace,
         EquatableArray<MemberSpec> Members,
-        string? UnsupportedReason) : IEquatable<ContractSpec>
+        string? UnsupportedReason,
+        string? BaseContractFullyQualifiedName,
+        bool IsRoot) : IEquatable<ContractSpec>
     {
         public bool IsSupported => UnsupportedReason is null;
+
+        /// <summary>Same contract, newly declared unsupported.</summary>
+        public ContractSpec WithUnsupportedReason(string reason) =>
+            UnsupportedReason is null ? this with { UnsupportedReason = reason } : this;
     }
 
     /// <summary>
@@ -41,11 +47,14 @@ public sealed partial class DataContractSerializerGenerator
         bool IsRequired,
         string MemberName,
         MemberKind Kind,
-        bool IsNullableValueType) : IEquatable<MemberSpec>;
+        bool IsNullableValueType,
+        string? NestedContractFullyQualifiedName,
+        string? ChildNamespaceToDeclare) : IEquatable<MemberSpec>;
 
     /// <summary>
     /// How a member's value is written. Mirrors the primitive cases XmlWriterDelegator handles in
-    /// dotnet/runtime; anything not listed here makes its contract unsupported for now.
+    /// dotnet/runtime, plus <see cref="Contract"/> for a member that is itself a data contract;
+    /// anything not listed here makes its contract unsupported for now.
     /// </summary>
     internal enum MemberKind
     {
@@ -67,6 +76,7 @@ public sealed partial class DataContractSerializerGenerator
         Guid,
         DateTime,
         TimeSpan,
-        ByteArray
+        ByteArray,
+        Contract
     }
 }
