@@ -22,5 +22,8 @@
     <!-- Referenced so generated code can be compiled against the real types it emits calls to,
          rather than against a stand-in that could drift from them. -->
     <ProjectReference Include="$(SourceDir)CoreWCF.DataContractSerialization\src\CoreWCF.DataContractSerialization.csproj" />
+    <!-- Provides a contract type that lives in a *different* assembly from the generated context,
+         which is the case where private [DataMember]s become invisible to the generator. -->
+    <ProjectReference Include="$(SourceDir)CoreWCF.DataContractSerialization.TestCorpus\src\CoreWCF.DataContractSerialization.TestCorpus.csproj" />
   </ItemGroup>
 </Project>

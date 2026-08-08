@@ -19,6 +19,8 @@ namespace CoreWCF.DataContractSerialization.Tests.Harness
     /// </remarks>
     public sealed class GeneratedSerializerProvider : SerializerProvider
     {
+        // Declared in the corpus assembly, alongside the types it serializes, so the generator can
+        // see their non-public data members.
         private readonly GeneratedCorpusContext _context = new GeneratedCorpusContext();
 
         public override string Id => "Generated";

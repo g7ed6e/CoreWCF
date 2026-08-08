@@ -74,7 +74,7 @@ public sealed partial class DataContractSerializerGenerator
                     continue;
                 }
 
-                contracts.Add(ParseContract(contractType, cancellationToken));
+                contracts.Add(ParseContract(contractType, contextType.ContainingAssembly, cancellationToken));
             }
 
             string? containingNamespace = contextType.ContainingNamespace.IsGlobalNamespace
@@ -89,7 +89,7 @@ public sealed partial class DataContractSerializerGenerator
                 new EquatableArray<DiagnosticInfo>(diagnostics.ToArray()));
         }
 
-        private static ContractSpec ParseContract(INamedTypeSymbol contractType, CancellationToken cancellationToken)
+        private static ContractSpec ParseContract(INamedTypeSymbol contractType, IAssemblySymbol contextAssembly, CancellationToken cancellationToken)
         {
             AttributeData dataContract = GetAttribute(contractType, DataContractAttributeName)!;
 
@@ -104,6 +104,26 @@ public sealed partial class DataContractSerializerGenerator
                 && baseType.SpecialType != SpecialType.System_ValueType)
             {
                 unsupportedReason = "inheritance is not supported yet (base type " + baseType.Name + ")";
+            }
+
+            // IsReference makes the serializer emit z:Id and z:Ref to preserve object identity.
+            // Ignoring it would produce output that looks plausible and is wrong, so decline.
+            if (unsupportedReason is null && GetNamedArgumentBoolean(dataContract, "IsReference") == true)
+            {
+                unsupportedReason = "IsReference is not supported yet";
+            }
+
+            // A contract from another assembly is only safe if every one of its data members is
+            // visible from here. Non-public members of a metadata type may not be surfaced at all,
+            // in which case they would be silently dropped - producing wrong XML rather than
+            // falling back. Since their absence is indistinguishable from their not existing, the
+            // only sound answer is to decline the whole contract.
+            if (unsupportedReason is null
+                && !SymbolEqualityComparer.Default.Equals(contractType.ContainingAssembly, contextAssembly))
+            {
+                unsupportedReason = "contract is declared in another assembly (" +
+                                    contractType.ContainingAssembly.Name +
+                                    "), where non-public data members may not be visible to the generator";
             }
 
             List<MemberSpec> members = new();

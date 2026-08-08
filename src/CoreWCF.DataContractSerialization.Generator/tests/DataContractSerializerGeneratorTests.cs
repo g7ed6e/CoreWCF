@@ -252,6 +252,51 @@ namespace App
         }
 
         [Fact]
+        public void ContractInAnotherAssemblyWithAPrivateMember_LeavesTheContractToReflection()
+        {
+            // SerializationTestTypes.BaseDCNoIsRef has a single [DataMember] on a private field.
+            // Compiled from metadata rather than source, that member may not be visible to the
+            // generator at all - in which case it would happily emit a serializer that silently
+            // drops it, producing XML that is wrong rather than absent. Whatever Roslyn surfaces,
+            // the outcome must be a fallback, never a partial serializer.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContractSerializable(typeof(SerializationTestTypes.BaseDCNoIsRef))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.DoesNotContain(
+                "if (type == typeof(global::SerializationTestTypes.BaseDCNoIsRef))",
+                result.SingleSource);
+        }
+
+        [Fact]
+        public void IsReferenceContract_LeavesTheContractToReflection()
+        {
+            // IsReference makes the serializer emit z:Id and z:Ref for object identity, which this
+            // slice does not implement. Emitting a serializer that ignored it would produce output
+            // that looks plausible and is wrong.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    [DataContract(IsReference = true)]
+    public class Referenced
+    {
+        [DataMember] public int Value { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Referenced))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains("IsReference", result.SingleSource);
+            Assert.DoesNotContain("if (type == typeof(global::App.Referenced))", result.SingleSource);
+        }
+
+        [Fact]
         public void NonPartialContext_ReportsCOREWCF_0400()
         {
             GeneratorResult result = GeneratorTestHarness.Run(Source(OrderContract + @"

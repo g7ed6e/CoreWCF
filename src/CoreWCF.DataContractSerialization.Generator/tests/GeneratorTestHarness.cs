@@ -100,7 +100,10 @@ namespace CoreWCF.DataContractSerialization.Generator.Tests
                     typeof(System.Runtime.Serialization.DataContractAttribute).Assembly,
                     // XmlDictionaryWriter and XmlDictionaryString live here, and the emitted code is
                     // written entirely in terms of them.
-                    typeof(System.Xml.XmlDictionaryWriter).Assembly
+                    typeof(System.Xml.XmlDictionaryWriter).Assembly,
+                    // A separate assembly holding real contract types, so cross-assembly member
+                    // visibility can be exercised.
+                    typeof(SerializationTestTypes.BaseDCNoIsRef).Assembly
                 })
                 {
                     if (!references.Any(r => string.Equals(r.Display, assembly.Location, StringComparison.OrdinalIgnoreCase)))
