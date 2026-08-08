@@ -165,6 +165,14 @@ namespace CoreWCF.Channels
                         ThrowMaxReceivedMessageSizeExceeded();
                     }
 
+                    // A chunked body has no ContentLength to size the read against, so the path
+                    // this replaced grew its buffer only up to MaxBufferSize and faulted there.
+                    if (ContentLength == -1 && buffer.Length >= _settings.MaxBufferSize)
+                    {
+                        throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
+                            MaxMessageSizeStream.CreateMaxReceivedMessageSizeExceededException(_settings.MaxBufferSize));
+                    }
+
                     if (result.IsCompleted)
                     {
                         break;

@@ -95,10 +95,25 @@ namespace CoreWCF.Channels
             private bool _closed;
 
             public ByteStreamBufferedMessageDataStream(ByteStreamBufferedMessageData messageData)
-                : base(PipeReader.Create(messageData.ReadOnlyBuffer).AsStream())
+                : base(CreateStream(messageData.ReadOnlyBuffer))
             {
                 _messageData = messageData;
                 _messageData.Open();
+            }
+
+            private static Stream CreateStream(ReadOnlySequence<byte> buffer)
+            {
+                // A single array backed segment keeps the seekable stream callers have always got
+                // back from GetBody<Stream>(); a sequence spanning segments can only be read
+                // forward without copying it out first.
+                if (buffer.IsSingleSegment
+                    && MemoryMarshal.TryGetArray(buffer.First, out ArraySegment<byte> segment)
+                    && segment.Array != null)
+                {
+                    return new MemoryStream(segment.Array, segment.Offset, segment.Count, writable: false);
+                }
+
+                return PipeReader.Create(buffer).AsStream();
             }
 
             protected override void Dispose(bool disposing)

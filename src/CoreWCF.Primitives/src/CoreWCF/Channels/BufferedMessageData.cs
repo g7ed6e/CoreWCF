@@ -27,7 +27,9 @@ namespace CoreWCF.Channels
         }
 
         [Obsolete]
-        public ArraySegment<byte> Buffer => throw new NotSupportedException(SR.BufferedMessageDataBufferNotSupported);
+        public ArraySegment<byte> Buffer
+            => throw DiagnosticUtility.ExceptionUtility.ThrowHelperError(
+                new NotSupportedException(SR.BufferedMessageDataBufferNotSupported));
 
         public ReadOnlySequence<byte> ReadOnlyBuffer => _readOnlyBuffer;
 

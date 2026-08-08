@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -34,6 +34,25 @@ namespace CoreWCF.Primitives.Tests
                 async () => await encoder.ReadMessageAsync(Buffer, BufferManager, encoder.ContentType));
 
             Assert.Contains(nameof(NoOverloadEncoder), exception.Message);
+        }
+
+        [Fact]
+        public async Task EncoderImplementingNeitherOverload_ReturnsTheBufferItRentedBeforeThrowing()
+        {
+            var encoder = new NoOverloadEncoder();
+            BufferManager bufferManager = BufferManager.CreateBufferManager(int.MaxValue, int.MaxValue);
+
+            // Seed the pool so the array the bridge rents is one we hold a reference to.
+            int length = (int)Buffer.Length;
+            byte[] pooled = bufferManager.TakeBuffer(length);
+            bufferManager.ReturnBuffer(pooled);
+
+            await Assert.ThrowsAsync<NotImplementedException>(
+                async () => await encoder.ReadMessageAsync(Buffer, bufferManager, encoder.ContentType));
+
+            // The bridge copies into a rented buffer before calling ReadMessage, and nothing owns
+            // that buffer once the call throws.
+            Assert.Same(pooled, bufferManager.TakeBuffer(length));
         }
 
         [Fact]

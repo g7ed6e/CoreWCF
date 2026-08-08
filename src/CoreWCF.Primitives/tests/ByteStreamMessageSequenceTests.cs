@@ -98,6 +98,22 @@ namespace CoreWCF.Primitives.Tests
         }
 
         [Fact]
+        public async Task BodyStreamOverASingleSegment_IsStillSeekable()
+        {
+            // GetBody<Stream>() has always handed back a seekable stream over the message buffer,
+            // and services rely on Length and Position being usable.
+            byte[] expected = Payload(300);
+            BufferManager bufferManager = BufferManager;
+
+            Message message = await Encoder.ReadMessageAsync(Rent(bufferManager, expected), bufferManager, ContentType);
+
+            using Stream body = message.GetBody<Stream>();
+
+            Assert.True(body.CanSeek);
+            Assert.Equal(expected.Length, body.Length);
+        }
+
+        [Fact]
         public async Task WriteBodyContents_ToAWriterOtherThanXmlByteStreamWriter_WritesTheBody()
         {
             byte[] expected = Encoding.ASCII.GetBytes("This is a text message");
