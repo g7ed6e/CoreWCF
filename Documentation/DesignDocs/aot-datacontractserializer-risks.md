@@ -241,6 +241,30 @@ differs is the failure mode: a catchable `SerializationException` becomes a proc
 `StackOverflowException`. Cheap to close (a depth counter threaded alongside the reference scope);
 left open deliberately rather than by oversight, and worth closing before the package ships.
 
+### 4c. `AllTypes` needs eight capabilities, not one — and the decline message hides that
+
+`ParseContract` records the **first** reason a contract is declined (`unsupportedReason ??=`) and
+stops describing it. For a wide contract that reads like a single remaining blocker when it is one
+of many, and it caused exactly that misreading of `AllTypes` once already.
+
+`AllTypes` and `AllTypes2` between them still need:
+
+| Member | Capability |
+| --- | --- |
+| `XmlQualifiedName xmlQualifiedName` | QName values, whose member element takes a `q:` prefix of its own rather than reusing the contract's |
+| `Uri uri` | `Uri`, written via `GetComponents(SerializationInfoString, UriEscaped)` — note the trailing slash the fixture records |
+| `ValueType timeSpan`, `ValueType valType` | a member declared as `System.ValueType`: the boxed switch again, but over value types |
+| `Enum enumBase1` | a member declared as `System.Enum`: the boxed switch over enums |
+| `Array array1` | a member declared as `System.Array`, whose items declare the Arrays namespace as a *default* xmlns on each element rather than a prefix on the member |
+| `List<DateTimeOffset> lDTO`, `DateTimeOffset? nDTO` | `DateTimeOffset`, which is written as a two-member contract (`DateTime`, `OffsetMinutes`) in the `System` namespace |
+
+Done: enums in an `object` member, and collections of enums. Both were on the list; neither moved
+the case count, because these two contracts need all of it before either can pass.
+
+The general lesson is about the report, not the contract: a coverage report that names one cause per
+contract will understate the work whenever the contract is wide. Collecting every reason rather than
+the first would make the remaining effort legible, and is worth doing before planning the next slice.
+
 ### 4b. An `object` member holding a collection throws rather than falling back
 
 The generated switch for an `object` member covers the boxed primitives and whatever `[KnownType]`

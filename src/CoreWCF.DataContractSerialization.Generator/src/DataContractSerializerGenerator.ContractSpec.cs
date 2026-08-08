@@ -81,6 +81,20 @@ public sealed partial class DataContractSerializerGenerator
         /// </summary>
         public string? ItemName { get; init; }
 
+        /// <summary>
+        /// For <see cref="MemberKind.Collection"/>, the namespace each item element sits in.
+        /// </summary>
+        /// <remarks>
+        /// The Arrays namespace for the built-in types, but an enum item is named after its own
+        /// contract and stays in its own namespace instead.
+        /// </remarks>
+        public string? ItemNamespace { get; init; }
+
+        /// <summary>
+        /// For a collection of enums, the enum whose value/name table writes each item.
+        /// </summary>
+        public string? ElementEnumFullyQualifiedName { get; init; }
+
         /// <summary>For <see cref="MemberKind.Collection"/>, whether an item may be null.</summary>
         public bool ElementCanBeNull { get; init; }
 
@@ -93,6 +107,15 @@ public sealed partial class DataContractSerializerGenerator
         /// the choice is announced with <c>i:type</c>, except for the declared type itself.
         /// </remarks>
         public EquatableArray<string> Candidates { get; init; } = new EquatableArray<string>(Array.Empty<string>());
+
+        /// <summary>
+        /// For <see cref="MemberKind.Object"/>, the enums the member may hold.
+        /// </summary>
+        /// <remarks>
+        /// Kept apart from <see cref="Candidates"/> because an enum is written from its value/name
+        /// table rather than by a content writer, and it has no <c>ContractSpec</c> to look up.
+        /// </remarks>
+        public EquatableArray<string> EnumCandidates { get; init; } = new EquatableArray<string>(Array.Empty<string>());
     }
 
     /// <summary>
@@ -107,7 +130,14 @@ public sealed partial class DataContractSerializerGenerator
         string FullyQualifiedName,
         bool IsFlags,
         bool IsUnsignedLong,
-        EquatableArray<EnumMemberSpec> Members) : IEquatable<EnumSpec>;
+        EquatableArray<EnumMemberSpec> Members) : IEquatable<EnumSpec>
+    {
+        /// <summary>The wire name, for the <c>i:type</c> of an enum in a boxed position.</summary>
+        public string ContractName { get; init; } = string.Empty;
+
+        /// <summary>The wire namespace, for the same reason.</summary>
+        public string ContractNamespace { get; init; } = string.Empty;
+    }
 
     internal sealed record EnumMemberSpec(string Name, long Value) : IEquatable<EnumMemberSpec>;
 

@@ -477,7 +477,7 @@ public sealed partial class DataContractSerializerGenerator
                 _builder.AppendLine($"{indentor}foreach (var item in {value})");
                 _builder.AppendLine($"{indentor}{{");
                 indentor.Increment();
-                _builder.AppendLine($"{indentor}writer.WriteStartElement({Literal(member.ItemName!)}, {Literal(CollectionNamespace)});");
+                _builder.AppendLine($"{indentor}writer.WriteStartElement({Literal(member.ItemName!)}, {Literal(member.ItemNamespace ?? CollectionNamespace)});");
 
                 if (member.ElementCanBeNull)
                 {
@@ -492,7 +492,14 @@ public sealed partial class DataContractSerializerGenerator
                     indentor.Increment();
                 }
 
-                _builder.AppendLine($"{indentor}{WriteValueStatement(member.ElementKind, "item")}");
+                if (member.ElementKind == MemberKind.Enum)
+                {
+                    EmitWriteEnum(indentor, member.ElementEnumFullyQualifiedName!, "item");
+                }
+                else
+                {
+                    _builder.AppendLine($"{indentor}{WriteValueStatement(member.ElementKind, "item")}");
+                }
 
                 if (member.ElementCanBeNull)
                 {
@@ -506,12 +513,7 @@ public sealed partial class DataContractSerializerGenerator
             }
             else if (member.Kind == MemberKind.Enum)
             {
-                int index = _enumIndexes[member.NestedContractFullyQualifiedName!];
-                EnumSpec spec = _enumSpecs[member.NestedContractFullyQualifiedName!];
-                string cast = spec.IsUnsignedLong ? $"unchecked((long)(ulong){value})" : $"(long){value}";
-                string isFlags = spec.IsFlags ? "true" : "false";
-
-                _builder.AppendLine($"{indentor}WriteEnum(writer, {cast}, __EnumValues{index}, __EnumNames{index}, {isFlags}, {Literal(member.NestedContractFullyQualifiedName!)});");
+                EmitWriteEnum(indentor, member.NestedContractFullyQualifiedName!, value);
             }
             else
             {
@@ -604,6 +606,24 @@ public sealed partial class DataContractSerializerGenerator
         }
 
         /// <summary>
+        /// Emits the call that writes one enum value from its table.
+        /// </summary>
+        /// <remarks>
+        /// The cast is where the backing type matters: a ulong-backed enum has to reinterpret its
+        /// bits rather than convert them, or every value past long.MaxValue becomes a different
+        /// number. Mirrors EnumDataContract's use of Convert.ToUInt64 for those enums.
+        /// </remarks>
+        private void EmitWriteEnum(Indentor indentor, string enumFullyQualifiedName, string value)
+        {
+            int index = _enumIndexes[enumFullyQualifiedName];
+            EnumSpec spec = _enumSpecs[enumFullyQualifiedName];
+            string cast = spec.IsUnsignedLong ? $"unchecked((long)(ulong){value})" : $"(long){value}";
+            string isFlags = spec.IsFlags ? "true" : "false";
+
+            _builder.AppendLine($"{indentor}WriteEnum(writer, {cast}, __EnumValues{index}, __EnumNames{index}, {isFlags}, {Literal(enumFullyQualifiedName)});");
+        }
+
+        /// <summary>
         /// Emits a member declared as <c>object</c>, whose runtime type decides everything.
         /// </summary>
         /// <remarks>
@@ -671,6 +691,19 @@ public sealed partial class DataContractSerializerGenerator
                     _builder.AppendLine($"{indentor}{ContentWriterName(candidate)}(writer, {typed}, scope);");
                 }
 
+                indentor.Decrement();
+                _builder.AppendLine($"{indentor}}}");
+            }
+
+            foreach (string enumCandidate in member.EnumCandidates)
+            {
+                EnumSpec spec = _enumSpecs[enumCandidate];
+
+                _builder.AppendLine($"{indentor}else if (__runtimeType == typeof({enumCandidate}))");
+                _builder.AppendLine($"{indentor}{{");
+                indentor.Increment();
+                EmitXsiType(indentor, spec.ContractName, spec.ContractNamespace);
+                EmitWriteEnum(indentor, enumCandidate, $"(({enumCandidate}){value})");
                 indentor.Decrement();
                 _builder.AppendLine($"{indentor}}}");
             }

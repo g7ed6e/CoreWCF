@@ -849,11 +849,11 @@ namespace App
         }
 
         [Fact]
-        public void ObjectMemberWithAnEnumKnownType_LeavesTheContractToReflection()
+        public void ObjectMemberWithAnEnumKnownType_WritesTheEnumWithAnXsiType()
         {
-            // Every known type in scope is a candidate for an object member. An enum is not a
-            // contract this generator can write into that position, so leaving it out would give the
-            // switch no branch for a value the real serializer accepts.
+            // Every known type in scope is a candidate for an object member, enums included. The
+            // enum is announced with i:type like any other contract, then written from its own
+            // value/name table rather than by a content writer.
             GeneratorResult result = GeneratorTestHarness.Run(Source(@"
     public enum Colour { Red }
 
@@ -871,8 +871,38 @@ namespace App
 "));
 
             AssertCompiles(result);
-            Assert.Contains("known type Colour is not a data contract", result.SingleSource);
-            Assert.DoesNotContain("if (type == typeof(global::App.Holder))", result.SingleSource);
+            Assert.Contains("__runtimeType == typeof(global::App.Colour)", result.SingleSource);
+            Assert.Contains("writer.WriteQualifiedName(\"Colour\", \"http://schemas.datacontract.org/2004/07/App\")", result.SingleSource);
+            Assert.Contains("WriteEnum(writer, (long)((global::App.Colour)value.Value)", result.SingleSource);
+        }
+
+        [Fact]
+        public void EnumCollection_NamesItemsAfterTheEnumContractNotTheArraysNamespace()
+        {
+            // An enum item is named after its own contract and stays in its own namespace, unlike
+            // the built-in types which all go into the Arrays namespace. AllTypes.enumArrayData in
+            // the corpus writes <a:MyEnum1> beside its containing contract for exactly this reason,
+            // with no xmlns declaration on the member element at all.
+            GeneratorResult result = GeneratorTestHarness.Run(Source(@"
+    public enum Colour { Red, Green }
+
+    [DataContract]
+    public class Palette
+    {
+        [DataMember] public Colour[] Colours { get; set; }
+    }
+
+    [DataContractSerializable(typeof(Palette))]
+    public partial class MyContext : DataContractSerializerContext
+    {
+    }
+"));
+
+            AssertCompiles(result);
+            Assert.Contains(
+                "writer.WriteStartElement(\"Colour\", \"http://schemas.datacontract.org/2004/07/App\");",
+                result.SingleSource);
+            Assert.DoesNotContain("http://schemas.microsoft.com/2003/10/Serialization/Arrays", result.SingleSource);
         }
 
         [Fact]

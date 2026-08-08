@@ -454,6 +454,7 @@ public sealed partial class DataContractSerializerGenerator
                 }
 
                 List<string> candidates = new();
+                List<string> enumCandidates = new();
 
                 if (nestedContract is not null && kind == MemberKind.Contract)
                 {
@@ -501,7 +502,14 @@ public sealed partial class DataContractSerializerGenerator
                     // the switch with no branch for it, so the contract is declined instead.
                     foreach (INamedTypeSymbol knownType in knownTypes)
                     {
-                        if (!IsContractType(knownType) || knownType.TypeKind == TypeKind.Enum)
+                        if (knownType.TypeKind == TypeKind.Enum)
+                        {
+                            enums.Add(knownType);
+                            enumCandidates.Add(knownType.ToDisplayString(FullyQualifiedFormat));
+                            continue;
+                        }
+
+                        if (!IsContractType(knownType))
                         {
                             unsupportedReason ??= "member '" + member.Name + "' is declared as object and known type " +
                                                   knownType.Name + " is not a data contract this generator can write";
@@ -515,20 +523,28 @@ public sealed partial class DataContractSerializerGenerator
 
                 MemberKind elementKind = MemberKind.Unsupported;
                 string? itemName = null;
+                string? itemNamespace = null;
                 bool elementCanBeNull = false;
+                INamedTypeSymbol? elementEnum = null;
 
                 if (kind == MemberKind.Collection)
                 {
-                    elementKind = ClassifyCollectionElement(memberType, out itemName, out elementCanBeNull);
+                    elementKind = ClassifyCollectionElement(
+                        memberType, contractNamespace, out itemName, out itemNamespace, out elementEnum, out elementCanBeNull);
+
                     if (elementKind == MemberKind.Unsupported)
                     {
                         unsupportedReason ??= "member '" + member.Name + "' has unsupported collection element type in '" +
                                               memberType.ToDisplayString() + "'";
                     }
+                    else if (elementEnum is not null)
+                    {
+                        enums.Add(elementEnum);
+                    }
                 }
 
                 string? childNamespace = kind == MemberKind.Collection
-                    ? (CollectionNamespace != contractNamespace ? CollectionNamespace : null)
+                    ? (itemNamespace != contractNamespace ? itemNamespace : null)
                     : ChildNamespaceToDeclare(memberType, contractNamespace);
 
                 // A serializable field carries no attribute to read, and upstream gives it Order 0
@@ -547,8 +563,11 @@ public sealed partial class DataContractSerializerGenerator
                 {
                     ElementKind = elementKind,
                     ItemName = itemName,
+                    ItemNamespace = itemNamespace,
+                    ElementEnumFullyQualifiedName = elementEnum?.ToDisplayString(FullyQualifiedFormat),
                     ElementCanBeNull = elementCanBeNull,
-                    Candidates = new EquatableArray<string>(candidates.ToArray())
+                    Candidates = new EquatableArray<string>(candidates.ToArray()),
+                    EnumCandidates = new EquatableArray<string>(enumCandidates.ToArray())
                 });
             }
 
@@ -604,9 +623,17 @@ public sealed partial class DataContractSerializerGenerator
         /// SanityPrimitiveArrays fixture, which was produced by the real serializer, so this table
         /// is checked against the serializer rather than against memory.
         /// </remarks>
-        private static MemberKind ClassifyCollectionElement(ITypeSymbol collectionType, out string? itemName, out bool canBeNull)
+        private static MemberKind ClassifyCollectionElement(
+            ITypeSymbol collectionType,
+            string containingNamespace,
+            out string? itemName,
+            out string? itemNamespace,
+            out INamedTypeSymbol? elementEnum,
+            out bool canBeNull)
         {
             itemName = null;
+            itemNamespace = CollectionNamespace;
+            elementEnum = null;
             canBeNull = false;
 
             ITypeSymbol? element = CollectionElementTypeOf(collectionType);
@@ -615,10 +642,24 @@ public sealed partial class DataContractSerializerGenerator
                 return MemberKind.Unsupported;
             }
 
-            MemberKind kind = ClassifyMember(element, out bool elementIsNullable, out INamedTypeSymbol? _);
-            if (kind == MemberKind.Unsupported || kind == MemberKind.Collection || kind == MemberKind.Contract || kind == MemberKind.Enum || elementIsNullable)
+            MemberKind kind = ClassifyMember(element, out bool elementIsNullable, out INamedTypeSymbol? elementContract);
+
+            // An enum item is named after its own contract and lives in its own namespace, not in
+            // the Arrays namespace the built-in types use - which is why AllTypes.enumArrayData
+            // writes <a:MyEnum1> beside its containing contract rather than <b:...>.
+            if (kind == MemberKind.Enum && !elementIsNullable && elementContract is not null)
             {
-                // Nested collections, contract items and enum items each need more than the item
+                elementEnum = elementContract;
+                itemName = ContractNameOf(elementContract);
+                itemNamespace = ContractNamespaceOf(elementContract);
+                canBeNull = false;
+                return MemberKind.Enum;
+            }
+
+            if (kind == MemberKind.Unsupported || kind == MemberKind.Collection || kind == MemberKind.Contract
+                || kind == MemberKind.Enum || kind == MemberKind.Object || elementIsNullable)
+            {
+                // Nested collections, contract items and boxed items each need more than the item
                 // name to write, so they stay on the reflection path for now.
                 return MemberKind.Unsupported;
             }
@@ -698,7 +739,11 @@ public sealed partial class DataContractSerializerGenerator
                 members.Add(new EnumMemberSpec(name, ToInt64(field.ConstantValue, isUnsignedLong)));
             }
 
-            return new EnumSpec(fullyQualifiedName, isFlags, isUnsignedLong, new EquatableArray<EnumMemberSpec>(members.ToArray()));
+            return new EnumSpec(fullyQualifiedName, isFlags, isUnsignedLong, new EquatableArray<EnumMemberSpec>(members.ToArray()))
+            {
+                ContractName = ContractNameOf(enumType),
+                ContractNamespace = ContractNamespaceOf(enumType)
+            };
         }
 
         /// <summary>
@@ -870,6 +915,18 @@ public sealed partial class DataContractSerializerGenerator
 
             return false;
         }
+
+        /// <summary>The wire name of a contract or enum: its <c>Name</c>, or the type's own name.</summary>
+        private static string ContractNameOf(INamedTypeSymbol type) =>
+            (GetAttribute(type, DataContractAttributeName) is AttributeData contract
+                ? GetNamedArgument(contract, "Name")
+                : null) ?? type.Name;
+
+        /// <summary>The wire namespace of a contract or enum.</summary>
+        private static string ContractNamespaceOf(INamedTypeSymbol type) =>
+            (GetAttribute(type, DataContractAttributeName) is AttributeData contract
+                ? GetNamedArgument(contract, "Namespace")
+                : null) ?? DefaultNamespaceFor(type);
 
         /// <summary>
         /// Whether this type is a contract the generator recognises - either an explicit
