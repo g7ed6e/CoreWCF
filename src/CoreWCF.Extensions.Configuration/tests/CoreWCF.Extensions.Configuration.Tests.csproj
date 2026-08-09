@@ -4,7 +4,15 @@
     <TargetFrameworks>$(TestTargetFrameworks)</TargetFrameworks>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <IsPackable>false</IsPackable>
+    <!-- On every target framework, not only the ones the shipped targets file defaults it on for. The
+         emitted code is within what LangVersion 11 allows everywhere, and net472 compiling it is worth
+         knowing: a consumer who opts in there should not be the one to discover otherwise. -->
+    <EnableCoreWCFConfigurationGenerator>true</EnableCoreWCFConfigurationGenerator>
   </PropertyGroup>
+
+  <ItemGroup>
+    <CompilerVisibleProperty Include="EnableCoreWCFConfigurationGenerator" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration" />
@@ -29,6 +37,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\CoreWCF.Extensions.Configuration.csproj" />
+    <!-- A package consumer gets the generator from analyzers/ inside the package; a project reference does
+         not carry that, so it is applied here the way the rest of the repository does it. -->
+    <ProjectReference Include="$(SourceDir)CoreWCF.Extensions.Configuration.Generator\src\CoreWCF.Extensions.Configuration.Generator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <!-- The transports these tests exercise. The package itself references CoreWCF.Primitives alone;
          an application brings the transports it uses, and names them by assembly in configuration. -->
     <ProjectReference Include="$(SourceDir)CoreWCF.Http\src\CoreWCF.Http.csproj" />

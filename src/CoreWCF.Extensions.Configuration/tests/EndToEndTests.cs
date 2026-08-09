@@ -14,8 +14,16 @@ namespace CoreWCF.Extensions.Configuration.Tests
     /// Stands up a CoreWCF host described only by configuration and calls it with a real WCF client, once per
     /// supported binding. These are what prove the hydrated bindings are usable rather than merely well shaped.
     /// </summary>
-    public class EndToEndTests
+    /// <remarks>
+    /// Run twice, once per derived class: once hydrating reflectively and once from generated metadata with the
+    /// reflective path forbidden outright. The second run is the only assertion that says the generator covers
+    /// this feature rather than merely part of it - anything it missed throws instead of quietly working.
+    /// </remarks>
+    public abstract class EndToEndTests
     {
+        /// <summary>How the host under test resolves and hydrates the types configuration names.</summary>
+        protected abstract ServiceModelConfigurationOptions Options { get; }
+
         private const string ServiceTypeName = "CoreWCF.Extensions.Configuration.Tests.EchoService, CoreWCF.Extensions.Configuration.Tests";
         private const string ContractName = "CoreWCF.Extensions.Configuration.Tests.IEchoService, CoreWCF.Extensions.Configuration.Tests";
 
@@ -72,7 +80,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             string expected = new string('a', 512);
 
-            using (IWebHost host = ConfiguredServiceHost.CreateHttpHost(HttpConfiguration()))
+            using (IWebHost host = ConfiguredServiceHost.CreateHttpHost(HttpConfiguration(), Options))
             {
                 host.Start();
 
@@ -102,7 +110,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
                 [$"ServiceModel:Services:{ServiceTypeName}:Endpoints:0:Address"] = address,
             };
 
-            using (IWebHost host = ConfiguredServiceHost.CreateNetTcpHost(settings, port))
+            using (IWebHost host = ConfiguredServiceHost.CreateNetTcpHost(settings, port, Options))
             {
                 host.Start();
 
@@ -126,7 +134,7 @@ namespace CoreWCF.Extensions.Configuration.Tests
         {
             string expected = "multi";
 
-            using (IWebHost host = ConfiguredServiceHost.CreateHttpHost(HttpConfiguration()))
+            using (IWebHost host = ConfiguredServiceHost.CreateHttpHost(HttpConfiguration(), Options))
             {
                 host.Start();
                 int port = host.GetHttpPort();

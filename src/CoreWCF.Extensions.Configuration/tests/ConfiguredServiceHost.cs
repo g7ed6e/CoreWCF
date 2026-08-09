@@ -43,16 +43,16 @@ namespace CoreWCF.Extensions.Configuration.Tests
         /// <summary>
         /// Builds a Kestrel host listening on an arbitrary free port, configured from <paramref name="settings"/>.
         /// </summary>
-        public static IWebHost CreateHttpHost(Dictionary<string, string> settings) =>
-            CreateBuilder(settings)
+        public static IWebHost CreateHttpHost(Dictionary<string, string> settings, ServiceModelConfigurationOptions options = null) =>
+            CreateBuilder(settings, options)
                 .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
                 .Build();
 
         /// <summary>
         /// Builds a host with the net.tcp transport listening on <paramref name="netTcpPort"/>.
         /// </summary>
-        public static IWebHost CreateNetTcpHost(Dictionary<string, string> settings, int netTcpPort) =>
-            CreateBuilder(settings)
+        public static IWebHost CreateNetTcpHost(Dictionary<string, string> settings, int netTcpPort, ServiceModelConfigurationOptions options = null) =>
+            CreateBuilder(settings, options)
                 .UseKestrel(options => options.Listen(IPAddress.Loopback, 0))
                 .UseNetTcp(IPAddress.Loopback, netTcpPort)
                 .Build();
@@ -75,12 +75,24 @@ namespace CoreWCF.Extensions.Configuration.Tests
             }
         }
 
-        private static IWebHostBuilder CreateBuilder(Dictionary<string, string> settings) =>
+        /// <remarks>
+        /// The options are registered before <c>AddServiceModelConfiguration</c> runs, which registers its own
+        /// with <c>TryAddSingleton</c> and therefore defers to these. That is the same seam an application uses
+        /// to supply a generated context, so the tests exercise it rather than a shortcut around it.
+        /// </remarks>
+        private static IWebHostBuilder CreateBuilder(Dictionary<string, string> settings, ServiceModelConfigurationOptions options) =>
             WebHost.CreateDefaultBuilder(new string[0])
                 .ConfigureAppConfiguration(builder =>
                 {
                     builder.Sources.Clear();
                     builder.AddInMemoryCollection(settings);
+                })
+                .ConfigureServices(services =>
+                {
+                    if (options != null)
+                    {
+                        services.AddSingleton(options);
+                    }
                 })
                 .UseStartup<ConfiguredStartup>();
     }
