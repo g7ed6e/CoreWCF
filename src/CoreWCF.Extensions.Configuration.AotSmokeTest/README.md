@@ -85,7 +85,11 @@ and are not this area's to fix. Two are worth naming because they are load-beari
 - **`CoreWCF.NetTcp` cannot be compiled by ILC at all.** Referencing it fails the publish with
   `Code generation failed for method 'CoreWCF.NetTcpBinding.CreateBindingElements()'`, a
   `BadImageFormatException` thrown from ILC's own generic cycle detector. That is why this app is HTTP
-  only, and it is a CoreWCF bug rather than a limitation of AOT.
+  only. The cause is `ConnectionIdWrappingLogger.Log<TState>`, which forwards to `ILogger.Log<T>` with
+  `T` = `(TState, string, Func<TState, Exception, string>)` — its own type parameter inside a tuple, so
+  the instantiation never bottoms out. The same file is in `CoreWCF.NetNamedPipe` and
+  `CoreWCF.UnixDomainSocket`. Removing the recursion makes net.tcp publish and run; the investigation is
+  written up in `Documentation/DesignDocs/aot-configuration-risks.md`.
 - **Four `IL3054` for generic recursion** in `AndMessageFilterTable<T>`, aborted rather than expanded.
   ILC's own message says an exception will be thrown at run time if that path is reached. This app does
   not reach it.

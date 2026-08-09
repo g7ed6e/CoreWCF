@@ -153,8 +153,64 @@ Referencing it fails the publish outright with
 `Code generation failed for method 'CoreWCF.NetTcpBinding.CreateBindingElements()'`, a
 `BadImageFormatException: Read out of bounds` thrown from ILC's own
 `LazyGenericsSupport.GenericCycleDetector`. Not a warning, not a run-time failure — the publish does not
-complete. That is why the smoke test is HTTP only, and it is a CoreWCF bug rather than a limitation of
-AOT.
+complete. That is why the smoke test is HTTP only. Investigated below, because it is a blocker for the
+whole transport rather than a wart.
+
+#### It is `ConnectionIdWrappingLogger.Log<TState>`
+
+`src/CoreWCF.NetTcp/src/CoreWCF/Channels/Framing/ConnectionIdWrappingLogger.cs:26`:
+
+```csharp
+public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception,
+                        Func<TState, Exception, string> formatter)
+{
+    (TState state, string connectionId, Func<TState, Exception, string> origFormatter) newState
+        = (state, _connectionId, formatter);
+    _innerLogger.Log(logLevel, eventId, newState, exception, ConnectionIdFormatter<TState>);
+}
+```
+
+`Log<TState>` calls `ILogger.Log<T>` with `T` = `(TState, string, Func<TState, Exception, string>)` — its
+own type parameter embedded in a larger type. That is an unbounded generic expansion: `Log<T>` needs
+`Log<(T, …)>`, which needs `Log<((T, …), …)>`, and so on forever. It is a real defect, not an artefact of
+AOT: under the JIT each level is instantiated lazily and a chain that is only ever one or two loggers deep
+never notices, but nothing bounds it.
+
+The same file, verbatim, is in **`CoreWCF.NetNamedPipe`** and **`CoreWCF.UnixDomainSocket`**. All three
+transports carry it.
+
+#### How that was established
+
+1. **Minimal repro.** `new NetTcpBinding().CreateBindingElements()` in an app referencing only
+   `CoreWCF.NetTcp` reproduces it. So does the shipped **`CoreWCF.NetTcp` 1.9.1** from nuget.org — this is
+   not something in this branch.
+2. **The metadata is not malformed.** Every signature, method body, local signature, `MemberRef`,
+   `TypeSpec`, `MethodSpec` and `StandAloneSig` in `CoreWCF.NetTcp` decodes cleanly, as do all 55
+   non-framework assemblies ILC was given.
+3. **The IL walk is not desynchronised.** Replaying `GraphBuilder`'s linear scan over exactly the methods
+   it walks (methods of generic types, plus generic methods) terminates cleanly on every one, and every
+   metadata token it reads resolves to a row that exists.
+4. **It is entirely inside the cycle detector.** `--maxgenericcycle:-1` makes `DetectCycle` return
+   immediately; the publish then succeeds and the binary runs correctly.
+5. **Breaking that one call fixes it.** Changing only line 26 so the forwarded state is not generic, with
+   the detector fully enabled, publishes and runs.
+
+#### Two defects, and they are separable
+
+- **CoreWCF's.** The unbounded recursion is real and worth removing on its own terms. The fix is small:
+  forward a non-generic carrier instead of a tuple, so `_innerLogger.Log<T>` is always instantiated at one
+  fixed `T`. Keeping the original state as `object` inside that carrier preserves what structured logging
+  providers see.
+- **ILC's.** A generic cycle is supposed to produce `IL3054` and carry on, which is what CoreWCF's four
+  `AndMessageFilterTable<T>` cycles do. This one throws `BadImageFormatException` instead and takes the
+  build down. Isolating the `ConnectionIdWrappingLogger` shape into a standalone app reproduces the *cycle*
+  — `IL3054`, publish succeeds — but not the crash, so the throw needs the whole module's graph. That is
+  the same code path as [dotnet/runtime#122845](https://github.com/dotnet/runtime/issues/122845), an
+  `IndexOutOfRangeException` from `GraphBuilder.WalkMethod` closed as a CI known-build-error, and it is
+  worth filing with the repro above.
+
+Removing the recursion unblocks the transport without waiting for ILC, and would let the smoke test cover
+net.tcp as well as HTTP.
 
 ---
 
