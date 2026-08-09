@@ -107,6 +107,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CoreWCF.DataContractSeriali
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CoreWCF.DataContractSerialization.Tests", "src\CoreWCF.DataContractSerialization\tests\CoreWCF.DataContractSerialization.Tests.csproj", "{1D524B8A-C329-41B1-9D0B-62C4187CF038}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CoreWCF.DataContractSerialization.AotSmokeTest", "src\CoreWCF.DataContractSerialization.AotSmokeTest\src\CoreWCF.DataContractSerialization.AotSmokeTest.csproj", "{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -549,6 +551,18 @@ Global
 		{1D524B8A-C329-41B1-9D0B-62C4187CF038}.Release|x64.Build.0 = Release|Any CPU
 		{1D524B8A-C329-41B1-9D0B-62C4187CF038}.Release|x86.ActiveCfg = Release|Any CPU
 		{1D524B8A-C329-41B1-9D0B-62C4187CF038}.Release|x86.Build.0 = Release|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Debug|x64.Build.0 = Debug|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Debug|x86.Build.0 = Debug|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Release|x64.ActiveCfg = Release|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Release|x64.Build.0 = Release|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Release|x86.ActiveCfg = Release|Any CPU
+		{2DF86E2D-1EFE-4DF0-8670-73DF7F447A93}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

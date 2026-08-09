@@ -476,6 +476,49 @@ anyone can act on.
 
 ---
 
+## The premise, executed
+
+Everything above is verified under a normal runtime, where dynamic code is available and nothing is
+trimmed. `src/CoreWCF.DataContractSerialization.AotSmokeTest` publishes a CoreWCF service with
+`PublishAot` and calls it over HTTP, so the premise the work exists for is run rather than assumed.
+It is not part of `dotnet test`: it proves something only once published. Its README says how.
+
+**It passes.** The generated serializer writes and reads the graph with `IsDynamicCodeSupported`
+false, and a whole service answers over HTTP with contents that match.
+
+Three things it found that were not visible from the unit tests.
+
+### The serializer this replaces loses data silently, not loudly
+
+Given the same contract in the same binary, the reflection-based `DataContractSerializer` fails - and
+*how* it fails is the finding. Before the contract types were rooted with `[DynamicDependency]` it
+did not throw: it wrote a document a quarter of the size, a graph missing most of its members,
+returned as though nothing were wrong. With the types rooted it throws `NullReferenceException`
+instead.
+
+Silent truncation is the worse of the two and it is what an AOT app would have got, which is the
+concrete form of the argument for warning on a fallback rather than falling back quietly.
+
+### CoreWCF needs the contract rooted before the trimmer will keep it
+
+`TypeLoader` finds operations by reflecting over the contract interface, and nothing calls those
+methods statically - the whole point of a dispatcher is that the call is dynamic. Without a
+`[DynamicDependency]` the interface arrives with **zero operations** and the host refuses to start.
+That is an annotation gap in CoreWCF, not something an application should have to know; the smoke
+test works around it so the stages after it can be reached.
+
+### A warning-free publish is a long way off
+
+339 trim and AOT warnings, essentially all from CoreWCF rather than from this area: 207 IL3050, 72
+IL2026, 56 assorted reflection-pattern warnings, and 4 IL3054 for generic recursion aborted in the
+message filter tables - that last one throws if the path is ever reached. They come from the security
+stack, the channel proxy and the dispatcher.
+
+So a CoreWCF service *runs* under AOT for this shape, without the guarantees a clean publish would
+give. Serialization is one of those warnings addressed. The rest are risk 5.
+
+---
+
 ## Risk register
 
 Ordered by how much each threatens the milestone.
@@ -678,9 +721,8 @@ failing a test, and nothing verifies it.
 - ~~Should an unsupported contract shape be a build-time diagnostic, or a silent fallback?~~
   Settled: both. The fallback happens and a warning names it - see "Falling back is visible, and
   still a fallback" above.
-- **Nothing has ever been published with `PublishAot`.** Every claim in this document is verified
-  under a normal runtime; the premise the work exists for is not. There is no AOT or trimming
-  infrastructure anywhere in the repository to verify it with.
+- ~~**Nothing has ever been published with `PublishAot`.**~~ Settled by
+  `CoreWCF.DataContractSerialization.AotSmokeTest` - see "The premise, executed" above.
 - Where the context must live once a corpus type has a private `[DataMember]`. Today exactly one does
   (`BaseDCNoIsRef._data`, out of slice), so the context sits in the test project and generator bugs
   cannot break the corpus build that the reflection oracle depends on. That trade reverses the moment
