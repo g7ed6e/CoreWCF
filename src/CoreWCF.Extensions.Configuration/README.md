@@ -121,3 +121,54 @@ would carry it. Tracked as [CoreWCF#1763](https://github.com/CoreWCF/CoreWCF/iss
 
 Address headers would remain out of scope regardless: an `AddressHeader`'s value is arbitrary
 DataContract-serialised XML, which a key/value configuration source cannot represent faithfully.
+
+## Trimming and Native AOT
+
+Everything above is reflection: a type named by a string, created with `Activator`, and filled in through
+`PropertyInfo.SetValue`. A trimmer cannot follow any of it — a type named only in a string is a type nothing
+references, so it is removed before the string is ever read — and reaching a collection's `Add` through
+`MakeGenericType` is something Native AOT cannot do at all.
+
+Declaring a context is what replaces all of it. List the types your configuration names:
+
+```csharp
+[ServiceModelConfigurable(typeof(NetTcpBinding), Name = "netTcp")]
+[ServiceModelConfigurable(typeof(EchoService))]
+[ServiceModelConfigurable(typeof(IEchoService))]
+public partial class MyServiceModel : ServiceModelConfigurationContext { }
+```
+
+```csharp
+services.AddServiceModelConfiguration(configuration.GetSection("ServiceModel"), new MyServiceModel());
+```
+
+A source generator fills the partial in with `typeof` in place of `Type.GetType`, `new T()` in place of
+`Activator.CreateInstance`, a cast and an assignment in place of `PropertyInfo.SetValue`, a closed generic cast in
+place of `MakeGenericType`, and a lookup table in place of `TypeDescriptor.GetConverter`.
+
+Only the types your *configuration file* names have to be listed. The generator walks the property graph below
+each one, so listing `NetTcpBinding` also covers `NetTcpSecurity`, `TcpTransportSecurity`,
+`XmlDictionaryReaderQuotas` and the vocabulary types. The exception is the concrete `BindingElement`s inside a
+`CustomBinding`, which nothing but the configuration knows about — those are listed individually, and a
+`CustomBinding` with none produces a build warning.
+
+`Name` adds a shorter spelling. The assembly qualified name always resolves too, so a configuration file written
+before the context keeps working after it.
+
+### Fallback
+
+Nothing here is required. Without a context, or on a target framework where the generator does not run — it is on
+by default for `.NETCoreApp 8.0` and later — the reflective path answers exactly as before, and the same source
+compiles everywhere with no `#if`.
+
+Set `ServiceModelConfigurationOptions.RequireGeneratedMetadata` to turn a type the context does not cover into an
+error naming the attribute to add, instead of a fallback. It defaults to true exactly when the runtime does not
+support dynamic code, because that is where falling back silently produces a host that starts and then misbehaves.
+
+### Diagnostics
+
+The generator reports `COREWCF_0600`–`COREWCF_0607`. The errors are for a context that cannot be generated into,
+or a name that would resolve to two types; the rest are warnings naming something that will fall back.
+
+See [`Documentation/DesignDocs/aot-configuration-risks.md`](../../Documentation/DesignDocs/aot-configuration-risks.md)
+for what has been verified under a real `PublishAot` publish, and what has not.
