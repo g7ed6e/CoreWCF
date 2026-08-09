@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk" ToolsVersion="15.0">
+﻿<Project Sdk="Microsoft.NET.Sdk" ToolsVersion="15.0">
   <PropertyGroup>
     <!-- Deliberately not net472. These tests compile the emitted code, and the emitter is entitled
          to use net6+ types - DateOnly, TimeOnly, ReferenceEqualityComparer - because
@@ -16,6 +16,23 @@
     <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="Verify.SourceGenerators" />
+    <!-- Verify pulls a newer Microsoft.Bcl.AsyncInterfaces than the repository pins centrally.
+         Overridden here rather than raised for everyone: this is a test project, and the pin
+         governs what the shipping libraries carry. -->
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" VersionOverride="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Snapshots are the generated code as committed; they must never be reformatted by an
+         editorconfig pass or normalised to CRLF, or every one of them shows a whole-file diff. -->
+    <None Update="Snapshots\*.verified.txt">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <ItemGroup>
     <AdditionalFiles Include="..\src\AnalyzerReleases.Shipped.md" />
     <AdditionalFiles Include="..\src\AnalyzerReleases.Unshipped.md" />

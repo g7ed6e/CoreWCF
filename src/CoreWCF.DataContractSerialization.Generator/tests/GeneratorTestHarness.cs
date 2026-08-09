@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
@@ -18,10 +18,12 @@ namespace CoreWCF.DataContractSerialization.Generator.Tests
     /// <remarks>
     /// Drives <see cref="CSharpGeneratorDriver"/> directly rather than using
     /// Microsoft.CodeAnalysis.Testing, as CoreWCF.BuildTools does. That harness verifies generated
-    /// sources by exact text match, which for a serializer body means pinning sixty lines of
-    /// emitted code per test and rewriting them all whenever formatting shifts. Here the emitted
-    /// text is asserted where it matters and the result compilation is checked for errors, so
-    /// invalid generated code still fails loudly.
+    /// sources by exact text match, which for a serializer body would mean pinning several hundred
+    /// lines of emitted code in every one of seventy tests. Here the emitted text is asserted where
+    /// it matters and the result compilation is checked for errors, so invalid generated code still
+    /// fails loudly - and the whole output is pinned separately, in five snapshots, by
+    /// GeneratedSourceSnapshotTests. Exact text is worth having; paying for it seventy times over is
+    /// not.
     /// </remarks>
     internal sealed class GeneratorResult
     {
@@ -56,7 +58,28 @@ namespace CoreWCF.DataContractSerialization.Generator.Tests
 
     internal static class GeneratorTestHarness
     {
-        internal static GeneratorResult Run(string source, bool enabled = true)
+        /// <summary>
+        /// Runs the generator and hands back the driver, for a snapshot of everything it produced.
+        /// </summary>
+        /// <remarks>
+        /// The assertion-based tests and the snapshots answer different questions and both are worth
+        /// keeping. An assertion says why a rule exists - that a QName resolves its prefix before the
+        /// element closes, say - and survives reformatting. A snapshot says what the generator
+        /// actually emitted, in full, where a reviewer can read it. Neither substitutes for the
+        /// other: a snapshot that changed tells you something moved but not whether it should have,
+        /// and an assertion passing tells you one line is right but nothing about the other six
+        /// hundred.
+        /// </remarks>
+        internal static GeneratorDriver RunForSnapshot(string source)
+        {
+            Run(source, enabled: true, out GeneratorDriver driver);
+            return driver;
+        }
+
+        internal static GeneratorResult Run(string source, bool enabled = true) =>
+            Run(source, enabled, out _);
+
+        private static GeneratorResult Run(string source, bool enabled, out GeneratorDriver driver)
         {
             CSharpParseOptions parseOptions = new(LanguageVersion.CSharp11);
 
@@ -66,7 +89,7 @@ namespace CoreWCF.DataContractSerialization.Generator.Tests
                 references: MetadataReferences,
                 options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
 
-            GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            driver = CSharpGeneratorDriver.Create(
                 generators: new[] { new DataContractSerializerGenerator().AsSourceGenerator() },
                 parseOptions: parseOptions,
                 optionsProvider: new TestOptionsProvider(enabled));
