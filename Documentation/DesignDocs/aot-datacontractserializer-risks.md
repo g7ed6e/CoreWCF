@@ -675,9 +675,12 @@ failing a test, and nothing verifies it.
 ## Open questions
 
 - Naming: `AotXmlObjectSerializer` is a placeholder. It is public API, so worth settling before release.
-- Should an unsupported contract shape be a build-time diagnostic, or a silent fallback to the
-  reflection path at runtime? Currently planned as a diagnostic for clearly-wrong input (context not
-  `partial`, type not a `[DataContract]`) and silent fallback for merely out-of-scope shapes.
+- ~~Should an unsupported contract shape be a build-time diagnostic, or a silent fallback?~~
+  Settled: both. The fallback happens and a warning names it - see "Falling back is visible, and
+  still a fallback" above.
+- **Nothing has ever been published with `PublishAot`.** Every claim in this document is verified
+  under a normal runtime; the premise the work exists for is not. There is no AOT or trimming
+  infrastructure anywhere in the repository to verify it with.
 - Where the context must live once a corpus type has a private `[DataMember]`. Today exactly one does
   (`BaseDCNoIsRef._data`, out of slice), so the context sits in the test project and generator bugs
   cannot break the corpus build that the reflection oracle depends on. That trade reverses the moment
