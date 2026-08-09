@@ -292,3 +292,6 @@ docker-compose.override.yml
 
 # Structured binlog files
 *.binlog
+
+# Verify writes these beside the snapshot when one does not match.
+*.received.*

@@ -9,9 +9,37 @@
 
   <ItemGroup>
     <ProjectReference Include="$(SourceDir)CoreWCF.Primitives\src\CoreWCF.Primitives.csproj" />
+    <ProjectReference Include="$(SourceDir)CoreWCF.Extensions.Configuration.Generator\src\CoreWCF.Extensions.Configuration.Generator.csproj" PrivateAssets="All" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="CoreWCF.Extensions.Configuration.props" Link="PackageFiles/CoreWCF.Extensions.Configuration.props" />
+    <None Include="CoreWCF.Extensions.Configuration.targets" Link="PackageFiles/CoreWCF.Extensions.Configuration.targets" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ship the source generator inside this package as an analyzer, mirroring how CoreWCF.Primitives
+         ships CoreWCF.BuildTools. -->
+    <Content Include="$(OutputPath)\CoreWCF.Extensions.Configuration.Generator.dll">
+      <Pack>true</Pack>
+      <PackagePath>analyzers/dotnet/roslyn4.8/cs</PackagePath>
+      <Visible>false</Visible>
+    </Content>
+    <!-- Named after the package id so NuGet imports them automatically in consuming projects. They
+         default the generator on per target framework - see the targets file. -->
+    <Content Include="CoreWCF.Extensions.Configuration.props">
+      <Pack>true</Pack>
+      <PackagePath>build;buildTransitive</PackagePath>
+      <Visible>false</Visible>
+    </Content>
+    <Content Include="CoreWCF.Extensions.Configuration.targets">
+      <Pack>true</Pack>
+      <PackagePath>build;buildTransitive</PackagePath>
+      <Visible>false</Visible>
+    </Content>
   </ItemGroup>
 
 </Project>

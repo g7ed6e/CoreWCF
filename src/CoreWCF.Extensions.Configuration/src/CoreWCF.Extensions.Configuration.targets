@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <!-- Default the configuration generator to enabled only on TFMs whose SDK default C# language
+         version supports the code it emits, which is .NETCoreApp 8.0 and later. .NETFramework,
+         .NETStandard and older .NETCoreApp targets stay off and hydrate reflectively, so a
+         multi-targeted project compiles everywhere without any conditional compilation in user code:
+         ServiceModelConfigurationContext's members simply return null where nothing was generated.
+
+         Gating here rather than constraining the emitted code to the oldest supported compiler is
+         deliberate, and it costs nothing - the targets that stay off are the ones with no NativeAOT
+         to be compatible with.
+
+         Consumers on other targets can opt in explicitly by setting
+         EnableCoreWCFConfigurationGenerator=true and raising LangVersion to 11 or higher. -->
+    <EnableCoreWCFConfigurationGenerator Condition="'$(EnableCoreWCFConfigurationGenerator)'=='' AND '$(TargetFrameworkIdentifier)' == '.NETCoreApp' AND $([MSBuild]::VersionGreaterThanOrEquals($(TargetFrameworkVersion.TrimStart('v')), '8.0'))">true</EnableCoreWCFConfigurationGenerator>
+    <EnableCoreWCFConfigurationGenerator Condition="'$(EnableCoreWCFConfigurationGenerator)'==''">false</EnableCoreWCFConfigurationGenerator>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Exposes EnableCoreWCFConfigurationGenerator to the source generator at build time -->
+    <CompilerVisibleProperty Include="EnableCoreWCFConfigurationGenerator" />
+  </ItemGroup>
+</Project>

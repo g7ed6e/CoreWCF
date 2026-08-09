@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ItemGroup>
+    <!-- Exposes EnableCoreWCFConfigurationGenerator at build time -->
+    <CompilerVisibleProperty Include="EnableCoreWCFConfigurationGenerator" />
+  </ItemGroup>
+</Project>
