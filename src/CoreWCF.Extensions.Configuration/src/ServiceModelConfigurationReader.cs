@@ -41,17 +41,20 @@ namespace CoreWCF.Extensions.Configuration
     public class ServiceModelConfigurationReader
     {
         private readonly BindingHydrator _hydrator;
-        private readonly ServiceModelTypeRegistry _registry;
 
         public ServiceModelConfigurationReader()
-            : this(new BindingHydrator(), new ServiceModelTypeRegistry())
+            : this(new BindingHydrator())
         {
         }
 
-        public ServiceModelConfigurationReader(BindingHydrator hydrator, ServiceModelTypeRegistry registry)
+        /// <summary>
+        /// Reads with the same name resolution the hydrator uses, so that a name a host registered - or a
+        /// type the generated context lists - applies to service and contract names as well as to binding
+        /// discriminators, from a single registration.
+        /// </summary>
+        public ServiceModelConfigurationReader(BindingHydrator hydrator)
         {
             _hydrator = hydrator ?? throw new ArgumentNullException(nameof(hydrator));
-            _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         }
 
         /// <summary>
@@ -71,7 +74,7 @@ namespace CoreWCF.Extensions.Configuration
 
             foreach (IConfigurationSection service in serviceModelSection.GetSection("Services").GetChildren())
             {
-                Type serviceType = _registry.Resolve(service.Key, service.Path);
+                Type serviceType = _hydrator.Resolver.Resolve(service.Key, service.Path);
 
                 IConfigurationSection endpoints = service.GetSection("Endpoints");
                 if (!endpoints.Exists())
@@ -95,7 +98,7 @@ namespace CoreWCF.Extensions.Configuration
             IDictionary<string, Binding> namedBindings)
         {
             IConfigurationSection contractSection = endpoint.GetSection("Contract");
-            Type contract = _registry.Resolve(contractSection.Value, contractSection.Path);
+            Type contract = _hydrator.Resolver.Resolve(contractSection.Value, contractSection.Path);
 
             Binding binding = ResolveBinding(endpoint.GetSection("Binding"), namedBindings);
             Uri address = ReadUri(endpoint.GetSection("Address"), required: true);

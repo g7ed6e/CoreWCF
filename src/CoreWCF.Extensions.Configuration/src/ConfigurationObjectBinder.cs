@@ -2,8 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
-using System.Collections.Generic;
-using System.Reflection;
 using Microsoft.Extensions.Configuration;
 
 namespace CoreWCF.Extensions.Configuration
@@ -13,38 +11,52 @@ namespace CoreWCF.Extensions.Configuration
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Hydration cannot be layered on <c>ConfigurationBinder</c>, for two reasons it has no extensibility point for.
-    /// A binding and its elements are polymorphic, and <c>ConfigurationBinder</c> cannot pick a concrete type from a
-    /// discriminator, so neither the binding itself nor the contents of <c>CustomBinding.Elements</c> can be created.
-    /// And several types that appear in ordinary binding configuration have no <see cref="System.ComponentModel.TypeConverter"/>
-    /// at all - <c>MessageVersion</c>, <c>EnvelopeVersion</c>, <c>SecurityAlgorithmSuite</c>, <c>MessageSecurityVersion</c> -
-    /// so their values cannot be converted from a string. See <see cref="ConfigurationValueConverter"/>.
+    /// Hydration cannot be layered on <c>ConfigurationBinder</c>, for two reasons it has no extensibility
+    /// point for. A binding and its elements are polymorphic, and <c>ConfigurationBinder</c> cannot pick a
+    /// concrete type from a discriminator, so neither the binding itself nor the contents of
+    /// <c>CustomBinding.Elements</c> can be created. And several types that appear in ordinary binding
+    /// configuration have no <see cref="System.ComponentModel.TypeConverter"/> at all -
+    /// <c>MessageVersion</c>, <c>EnvelopeVersion</c>, <c>SecurityAlgorithmSuite</c>,
+    /// <c>MessageSecurityVersion</c> - so their values cannot be converted from a string. See
+    /// <see cref="ConfigurationValueConverter"/>.
     /// </para>
     /// <para>
-    /// Driving the traversal from the configuration keys rather than from the target's properties buys two further
-    /// things. An unknown key becomes an error naming its configuration path, instead of a value that silently does
-    /// nothing. And a property the configuration does not mention is genuinely untouched: <c>ConfigurationBinder</c>
-    /// round-trips every settable property through its getter and setter whether or not it is configured, which
-    /// matters here because binding accessors are not pure - <c>ReaderQuotas</c> copies the incoming value over the
-    /// encoder's instance, and <c>Security</c> rejects null and replaces the whole sub-object.
+    /// Driving the traversal from the configuration keys rather than from the target's properties buys two
+    /// further things. An unknown key becomes an error naming its configuration path, instead of a value
+    /// that silently does nothing. And a property the configuration does not mention is genuinely
+    /// untouched: <c>ConfigurationBinder</c> round-trips every settable property through its getter and
+    /// setter whether or not it is configured, which matters here because binding accessors are not pure -
+    /// <c>ReaderQuotas</c> copies the incoming value over the encoder's instance, and <c>Security</c>
+    /// rejects null and replaces the whole sub-object.
+    /// </para>
+    /// <para>
+    /// How a member is reached is <see cref="ConfiguredTypeProvider"/>'s business, not this class's. The
+    /// traversal is written once and runs unchanged whether the members came from the generator or from
+    /// reflection.
     /// </para>
     /// </remarks>
     internal sealed class ConfigurationObjectBinder
     {
-        private const BindingFlags PropertyFlags =
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy | BindingFlags.IgnoreCase;
-
-        private readonly ServiceModelTypeRegistry _registry;
+        private readonly ServiceModelTypeResolver _resolver;
+        private readonly ConfiguredTypeProvider _types;
+        private readonly ConfigurationValueConverter _converter;
         private readonly string _discriminatorKey;
 
-        public ConfigurationObjectBinder(ServiceModelTypeRegistry registry, string discriminatorKey)
+        public ConfigurationObjectBinder(
+            ServiceModelTypeResolver resolver,
+            ConfiguredTypeProvider types,
+            string discriminatorKey)
         {
-            _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+            _types = types ?? throw new ArgumentNullException(nameof(types));
             _discriminatorKey = discriminatorKey ?? throw new ArgumentNullException(nameof(discriminatorKey));
+            _converter = new ConfigurationValueConverter(types);
         }
 
         public void Bind(object instance, IConfiguration section)
         {
+            ConfiguredType configured = _types.Get(instance.GetType(), (section as IConfigurationSection)?.Path);
+
             foreach (IConfigurationSection child in section.GetChildren())
             {
                 if (string.Equals(child.Key, _discriminatorKey, StringComparison.OrdinalIgnoreCase))
@@ -52,96 +64,89 @@ namespace CoreWCF.Extensions.Configuration
                     continue;
                 }
 
-                PropertyInfo property = FindProperty(instance.GetType(), child.Key);
-                if (property == null)
+                if (!configured.Members.TryGetValue(child.Key, out ConfiguredMember member))
                 {
                     throw new BindingConfigurationException(
-                        $"'{instance.GetType().Name}' has no property named '{child.Key}' " +
+                        $"'{configured.Type.Name}' has no property named '{child.Key}' " +
                         $"(configuration path '{child.Path}').");
                 }
 
-                BindProperty(instance, property, child);
+                BindMember(instance, configured, member, child);
             }
         }
 
-        private void BindProperty(object instance, PropertyInfo property, IConfigurationSection section)
+        private void BindMember(
+            object instance,
+            ConfiguredType declaring,
+            ConfiguredMember member,
+            IConfigurationSection section)
         {
-            Type propertyType = property.PropertyType;
-
             if (section.Value != null)
             {
-                RequireSetter(instance, property, section);
-                property.SetValue(instance, ConfigurationValueConverter.Convert(section.Value, propertyType, section.Path));
-                return;
-            }
-
-            if (TryGetCollectionItemType(propertyType, out Type itemType))
-            {
-                object collection = property.GetValue(instance);
-                if (collection == null)
-                {
-                    throw new BindingConfigurationException(
-                        $"'{instance.GetType().Name}.{property.Name}' is null, so its items cannot be populated " +
-                        $"(configuration path '{section.Path}').");
-                }
-
-                BindCollection(collection, itemType, section);
+                RequireSetter(declaring, member, section);
+                member.Set(instance, _converter.Convert(section.Value, member.MemberType, section.Path));
                 return;
             }
 
             string typeName = section[_discriminatorKey];
-            if (typeName != null || propertyType.IsAbstract)
+            if (typeName != null || member.MemberType.IsAbstract)
             {
-                // The configuration chose the concrete type, so a fresh instance has to replace whatever is there.
-                RequireSetter(instance, property, section);
-                object replacement = CreateInstance(propertyType, typeName, section);
+                // The configuration chose the concrete type, so a fresh instance has to replace whatever is
+                // there. Asked before anything else because the declared type may be abstract, and an
+                // abstract type is one nothing needs metadata for.
+                RequireSetter(declaring, member, section);
+                object replacement = CreateInstance(member.MemberType, typeName, section);
                 Bind(replacement, section);
-                property.SetValue(instance, replacement);
+                member.Set(instance, replacement);
+                return;
+            }
+
+            ConfiguredType memberType = _types.Get(member.MemberType, section.Path);
+
+            if (memberType.AddItem != null)
+            {
+                object collection = member.Get?.Invoke(instance);
+                if (collection == null)
+                {
+                    throw new BindingConfigurationException(
+                        $"'{declaring.Type.Name}.{member.Name}' is null, so its items cannot be populated " +
+                        $"(configuration path '{section.Path}').");
+                }
+
+                BindCollection(collection, memberType, section);
                 return;
             }
 
             // Bind into the instance the binding already created. Bindings carry meaningful defaults on these
             // sub-objects (security, reader quotas), and replacing them would silently discard those defaults.
-            object existing = property.GetValue(instance);
+            object existing = member.Get?.Invoke(instance);
             if (existing != null)
             {
                 Bind(existing, section);
                 return;
             }
 
-            RequireSetter(instance, property, section);
-            object created = CreateInstance(propertyType, typeName: null, section: section);
+            RequireSetter(declaring, member, section);
+            object created = CreateInstance(member.MemberType, typeName: null, section: section);
             Bind(created, section);
-            property.SetValue(instance, created);
+            member.Set(instance, created);
         }
 
-        private void BindCollection(object collection, Type itemType, IConfigurationSection section)
+        private void BindCollection(object collection, ConfiguredType collectionType, IConfigurationSection section)
         {
-            MethodInfo add = typeof(ICollection<>).MakeGenericType(itemType).GetMethod("Add");
-
             foreach (IConfigurationSection child in section.GetChildren())
             {
-                object item = CreateInstance(itemType, child[_discriminatorKey], child);
+                object item = CreateInstance(collectionType.ItemType, child[_discriminatorKey], child);
                 Bind(item, child);
-                add.Invoke(collection, new[] { item });
+                collectionType.AddItem(collection, item);
             }
         }
 
-        private object CreateInstance(Type declaredType, string typeName, IConfigurationSection section)
+        /// <summary>
+        /// Creates an instance of a type the configuration has already named.
+        /// </summary>
+        public object CreateInstance(Type concreteType, IConfigurationSection section)
         {
-            Type concreteType = declaredType;
-
-            if (typeName != null)
-            {
-                concreteType = _registry.Resolve(declaredType, typeName, section.Path);
-            }
-            else if (declaredType.IsAbstract)
-            {
-                throw new BindingConfigurationException(
-                    $"A '{_discriminatorKey}' value is required to choose a concrete {declaredType.Name} " +
-                    $"(configuration path '{section.Path}').");
-            }
-
             if (concreteType.IsAbstract)
             {
                 throw new BindingConfigurationException(
@@ -149,67 +154,42 @@ namespace CoreWCF.Extensions.Configuration
                     $"(configuration path '{section.Path}').");
             }
 
-            if (concreteType.GetConstructor(Type.EmptyTypes) == null)
+            ConfiguredType configured = _types.Get(concreteType, section.Path);
+            if (configured.Create == null)
             {
                 throw new BindingConfigurationException(
                     $"'{concreteType.FullName}' has no parameterless constructor and cannot be created from " +
                     $"configuration (configuration path '{section.Path}').");
             }
 
-            return Activator.CreateInstance(concreteType);
+            return configured.Create();
         }
 
-        private static void RequireSetter(object instance, PropertyInfo property, IConfigurationSection section)
+        private object CreateInstance(Type declaredType, string typeName, IConfigurationSection section)
         {
-            if (property.SetMethod == null || !property.SetMethod.IsPublic)
+            if (typeName != null)
+            {
+                return CreateInstance(_resolver.Resolve(declaredType, typeName, section.Path), section);
+            }
+
+            if (declaredType.IsAbstract)
             {
                 throw new BindingConfigurationException(
-                    $"'{instance.GetType().Name}.{property.Name}' is read-only and cannot be set from configuration " +
+                    $"A '{_discriminatorKey}' value is required to choose a concrete {declaredType.Name} " +
                     $"(configuration path '{section.Path}').");
             }
+
+            return CreateInstance(declaredType, section);
         }
 
-        private static PropertyInfo FindProperty(Type type, string name)
+        private static void RequireSetter(ConfiguredType declaring, ConfiguredMember member, IConfigurationSection section)
         {
-            try
+            if (member.Set == null)
             {
-                return type.GetProperty(name, PropertyFlags);
+                throw new BindingConfigurationException(
+                    $"'{declaring.Type.Name}.{member.Name}' is read-only and cannot be set from configuration " +
+                    $"(configuration path '{section.Path}').");
             }
-            catch (AmbiguousMatchException)
-            {
-                // A property re-declared with 'new' in a derived type; the most derived one wins.
-                for (Type current = type; current != null; current = current.BaseType)
-                {
-                    PropertyInfo property = current.GetProperty(name, PropertyFlags | BindingFlags.DeclaredOnly);
-                    if (property != null)
-                    {
-                        return property;
-                    }
-                }
-
-                return null;
-            }
-        }
-
-        private static bool TryGetCollectionItemType(Type type, out Type itemType)
-        {
-            itemType = null;
-
-            if (type == typeof(string))
-            {
-                return false;
-            }
-
-            foreach (Type contract in type.GetInterfaces())
-            {
-                if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(ICollection<>))
-                {
-                    itemType = contract.GetGenericArguments()[0];
-                    return true;
-                }
-            }
-
-            return false;
         }
     }
 }

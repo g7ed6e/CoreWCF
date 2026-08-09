@@ -26,7 +26,6 @@ namespace CoreWCF.Extensions.Configuration
     /// </remarks>
     public sealed class BindingHydrator
     {
-        private readonly ServiceModelTypeRegistry _registry;
         private readonly string _discriminatorKey;
         private readonly ConfigurationObjectBinder _binder;
 
@@ -42,7 +41,7 @@ namespace CoreWCF.Extensions.Configuration
                 throw new ArgumentNullException(nameof(options));
             }
 
-            _registry = options.Registry ?? throw new ArgumentException(
+            ServiceModelTypeRegistry registry = options.Registry ?? throw new ArgumentException(
                 $"{nameof(BindingHydratorOptions)}.{nameof(BindingHydratorOptions.Registry)} is required.",
                 nameof(options));
 
@@ -54,8 +53,19 @@ namespace CoreWCF.Extensions.Configuration
             }
 
             _discriminatorKey = options.DiscriminatorKey;
-            _binder = new ConfigurationObjectBinder(_registry, _discriminatorKey);
+            Resolver = new ServiceModelTypeResolver(registry, options.Context, options.RequireGeneratedMetadata);
+            _binder = new ConfigurationObjectBinder(
+                Resolver,
+                new ConfiguredTypeProvider(options.Context, options.RequireGeneratedMetadata),
+                _discriminatorKey);
         }
+
+        /// <summary>
+        /// How this hydrator turns names into types. <see cref="ServiceModelConfigurationReader"/> takes it
+        /// from here rather than being handed a second registry, so that the names a host registers apply
+        /// to service and contract names as well as to binding discriminators.
+        /// </summary>
+        internal ServiceModelTypeResolver Resolver { get; }
 
         /// <summary>
         /// Creates the single binding described by <paramref name="section"/>.
@@ -75,8 +85,8 @@ namespace CoreWCF.Extensions.Configuration
                     $"(configuration path '{section.Path}').");
             }
 
-            Type bindingType = _registry.ResolveBinding(typeName, section.Path);
-            var binding = (Binding)Activator.CreateInstance(bindingType);
+            Type bindingType = Resolver.ResolveBinding(typeName, section.Path);
+            var binding = (Binding)_binder.CreateInstance(bindingType, section);
             _binder.Bind(binding, section);
             return binding;
         }
