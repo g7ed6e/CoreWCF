@@ -20,19 +20,30 @@ namespace CoreWCF.Channels.Framing
 
         public bool IsEnabled(LogLevel logLevel) => _innerLogger.IsEnabled(logLevel);
 
+        /// <summary>
+        /// Forwards the entry with the connection id prepended to the formatted message.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The state is passed through unchanged and only the formatter is wrapped. That is not a
+        /// stylistic preference. Forwarding a state that embeds <typeparamref name="TState"/> - which a
+        /// <c>(TState, string, Func&lt;TState, Exception, string&gt;)</c> tuple did - makes
+        /// <c>Log&lt;TState&gt;</c> call <c>Log&lt;(TState, ...)&gt;</c>, which calls
+        /// <c>Log&lt;((TState, ...), ...)&gt;</c>, with nothing to bound it. The JIT instantiates those
+        /// lazily and a chain only ever one or two loggers deep never notices, but an ahead of time
+        /// compiler has to decide the whole set before the program runs: ILC refused to compile
+        /// CoreWCF.NetTcp at all, failing the publish rather than warning.
+        /// </para>
+        /// <para>
+        /// Passing the state through also means a structured logging provider sees the state the caller
+        /// supplied. A tuple wrapping it hid that.
+        /// </para>
+        /// </remarks>
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-            (TState state, string connectionId, Func<TState, Exception, string> origFormatter) newState = (state, _connectionId, formatter);
-            _innerLogger.Log(logLevel, eventId, newState, exception, ConnectionIdFormatter<TState>);
-        }
-
-        private static string ConnectionIdFormatter<TState>((TState state, string connectionId, Func<TState, Exception, string> formatter) modifiedState, Exception exception)
-        {
-            var state = modifiedState.state;
-            var connectionId = modifiedState.connectionId;
-            var formatter = modifiedState.formatter;
-            var formattedString = formatter(state, exception);
-            return $"[{connectionId}] {formattedString}";
+            string connectionId = _connectionId;
+            _innerLogger.Log(logLevel, eventId, state, exception,
+                (s, e) => $"[{connectionId}] {formatter(s, e)}");
         }
     }
 
